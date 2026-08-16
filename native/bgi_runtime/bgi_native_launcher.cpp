@@ -1,0 +1,131 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#include <shellapi.h>
+
+#include <string>
+#include <vector>
+#include <cstdint>
+
+namespace {
+
+std::wstring QuoteArg(const std::wstring &arg) {
+    std::wstring out = L"\"";
+    for (wchar_t ch : arg) {
+        if (ch == L'"') out += L'\\';
+        out += ch;
+    }
+    out += L"\"";
+    return out;
+}
+
+std::wstring DirName(const std::wstring &path) {
+    size_t pos = path.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return L".";
+    return path.substr(0, pos);
+}
+
+std::wstring JoinPath(const std::wstring &a, const std::wstring &b) {
+    if (a.empty()) return b;
+    if (a.back() == L'\\' || a.back() == L'/') return a + b;
+    return a + L"\\" + b;
+}
+
+std::wstring GetSelfDir() {
+    wchar_t buf[MAX_PATH * 4] = {};
+    DWORD n = GetModuleFileNameW(nullptr, buf, static_cast<DWORD>(MAX_PATH * 4));
+    if (n == 0) return L".";
+    return DirName(std::wstring(buf, n));
+}
+
+bool FileExists(const std::wstring &path) {
+    DWORD attrs = GetFileAttributesW(path.c_str());
+    return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+void ErrorBox(const std::wstring &message) {
+    MessageBoxW(nullptr, message.c_str(), L"BGI Native Launcher", MB_ICONERROR | MB_OK);
+}
+
+std::wstring GetExeFromArgs() {
+    int argc = 0;
+    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    std::wstring result;
+    if (argv && argc >= 2) result = argv[1];
+    if (argv) LocalFree(argv);
+    return result;
+}
+
+bool InjectDll(HANDLE process, const std::wstring &dllPath) {
+    size_t bytes = (dllPath.size() + 1) * sizeof(wchar_t);
+    void *remote = VirtualAllocEx(process, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remote) return false;
+    if (!WriteProcessMemory(process, remote, dllPath.c_str(), bytes, nullptr)) {
+        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+        return false;
+    }
+    HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    auto loadLibraryW = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(kernel, "LoadLibraryW"));
+    HANDLE thread = CreateRemoteThread(process, nullptr, 0, loadLibraryW, remote, 0, nullptr);
+    if (!thread) {
+        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+        return false;
+    }
+    WaitForSingleObject(thread, 15000);
+    DWORD remoteModule = 0;
+    GetExitCodeThread(thread, &remoteModule);
+    CloseHandle(thread);
+    VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+    return remoteModule != 0;
+}
+
+}  // namespace
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
+    std::wstring selfDir = GetSelfDir();
+    std::wstring exePath = GetExeFromArgs();
+    if (exePath.empty()) {
+        exePath = JoinPath(selfDir, L"BGI.exe");
+        if (!FileExists(exePath)) exePath = JoinPath(selfDir, L"lingo.exe");
+    }
+    if (!FileExists(exePath)) {
+        ErrorBox(L"Game executable not found.\nPass the exe path to bgi_native_launcher.exe.");
+        return 1;
+    }
+
+    std::wstring dllPath = JoinPath(selfDir, L"bgi_native_hook.dll");
+    if (!FileExists(dllPath)) {
+        dllPath = JoinPath(JoinPath(selfDir, L"_translation_meta"), L"bgi_native_hook.dll");
+    }
+    if (!FileExists(dllPath)) {
+        ErrorBox(L"bgi_native_hook.dll not found.");
+        return 1;
+    }
+
+    std::wstring gameDir = DirName(exePath);
+    std::wstring commandLine = QuoteArg(exePath);
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    std::vector<wchar_t> cmd(commandLine.begin(), commandLine.end());
+    cmd.push_back(0);
+
+    if (!CreateProcessW(exePath.c_str(), cmd.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr, gameDir.c_str(), &si, &pi)) {
+        ErrorBox(L"Failed to start game executable.");
+        return 1;
+    }
+
+    bool ok = InjectDll(pi.hProcess, dllPath);
+    if (!ok) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        ErrorBox(L"Failed to inject bgi_native_hook.dll.");
+        return 1;
+    }
+
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 0;
+}

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "GameStringer Preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3002", "--directory", "C:\\Users\\31714\\game-translator\\web"],
+      "port": 3002
+    }
+  ]
+}
