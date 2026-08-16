@@ -1,0 +1,23 @@
+.tabs {
+    flex-wrap: nowrap;
+}
+
+.tabs button {
+    min-width: 0;
+    padding-inline: 3px;
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+
+#cloud-translation-settings[hidden] {
+    display: none;
+}
+
+.local-model-scope-note {
+    margin-bottom: 13px;
+}
+
+#tab-local-model input:disabled {
+    color: var(--text-dim);
+    cursor: default;
+}

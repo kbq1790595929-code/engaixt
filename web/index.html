@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EngAixt</title>
+<link rel="icon" href="app.ico">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="local_model_settings.css">
+</head>
+<body>
+
+<!-- 背景氛围层 -->
+<div class="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+<div class="grain" aria-hidden="true"></div>
+
+<!-- SVG 图标库 -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></symbol>
+  <symbol id="i-lang" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-gamepad" viewBox="0 0 24 24"><line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+  <symbol id="i-folder-down" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="m15 13-3 3-3-3"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
+  <symbol id="i-import" viewBox="0 0 24 24"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+  <symbol id="i-fullscreen" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 5.8 1c-.42.7-1.05 1.1-1.65 1.5-.7.46-1.25.82-1.25 1.8"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></symbol>
+  <symbol id="i-crown" viewBox="0 0 24 24"><path d="m2 6 5 12h10l5-12-6 5-4-8-4 8-6-5z"/><path d="M7 18h10"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="M2.6 17.4A2 2 0 0 0 2 18.8V21a1 1 0 0 0 1 1h3v-3h3v-3h3l1.4-1.4"/><circle cx="16.5" cy="7.5" r="5.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.06 12.35a1 1 0 0 1 0-.7C3.2 8.7 6.72 5 12 5s8.8 3.7 9.94 6.65a1 1 0 0 1 0 .7C20.8 15.3 17.28 19 12 19s-8.8-3.7-9.94-6.65Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M6.71 6.72C4.45 8.1 2.98 10.29 2.06 12.35a1 1 0 0 0 0 .7C3.2 16 6.72 19 12 19c1.67 0 3.13-.3 4.38-.8"/><path d="M19.73 15.73c.9-.98 1.6-2.15 2.21-3.38a1 1 0 0 0 0-.7C20.8 8.7 17.28 5 12 5c-.94 0-1.82.12-2.63.34"/><path d="M9.88 9.88A3 3 0 0 0 12 15a3 3 0 0 0 2.12-.88"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- ── 侧边栏 ── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"><svg class="ic"><use href="#i-spark"/></svg></div>
+      <div class="brand-text">
+        <div class="brand-name">EngAixt</div>
+        <div class="brand-sub">游戏翻译工具</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-group-label"><span>导航</span></div>
+      <button class="nav-item active" id="nav-translate" onclick="navTo('main')">
+        <svg class="ic"><use href="#i-lang"/></svg><span class="nav-label">翻译</span>
+      </button>
+      <button class="nav-item" id="nav-games" onclick="navTo('games')">
+        <svg class="ic"><use href="#i-gamepad"/></svg><span class="nav-label">游戏库</span>
+      </button>
+      <button class="nav-item" onclick="openSettings()">
+        <svg class="ic"><use href="#i-gear"/></svg><span class="nav-label">设置</span>
+      </button>
+
+      <div class="nav-group-label"><span>工具</span></div>
+      <button class="nav-item actions-btn" onclick="installTools()">
+        <svg class="ic"><use href="#i-wrench"/></svg><span class="nav-label">安装/更新工具</span>
+      </button>
+      <button class="nav-item actions-btn" id="nav-app-update" onclick="updateApp()" title="当前版本：读取中">
+        <svg class="ic"><use href="#i-refresh"/></svg><span class="nav-label">软件更新</span>
+        <span class="nav-badge" id="nav-app-update-badge" hidden>新</span>
+      </button>
+      <button class="nav-item actions-btn" onclick="openDiagnostics()">
+        <svg class="ic"><use href="#i-activity"/></svg><span class="nav-label">诊断报告</span>
+      </button>
+      <button class="nav-item actions-btn" onclick="clearCache()">
+        <svg class="ic"><use href="#i-trash"/></svg><span class="nav-label">清除缓存</span>
+      </button>
+      <button class="nav-item danger actions-btn" onclick="uninstallTranslation()">
+        <svg class="ic"><use href="#i-undo"/></svg><span class="nav-label">卸载汉化</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <span class="dot idle" id="status-dot"></span>
+      <span id="status-text" class="status-label">空闲</span>
+      <span class="ver" id="app-version-badge">v1.1.9</span>
+    </div>
+  </aside>
+
+  <!-- ── 主内容区 ── -->
+  <main class="content">
+    <div class="top-actions">
+      <div class="license-pill loading" id="license-pill" title="试用额度">
+        <svg class="ic"><use href="#i-activity"/></svg>
+        <span id="license-text">读取额度…</span>
+      </div>
+      <div class="support-actions" aria-label="支持入口">
+        <button class="top-link-trigger" onclick="openSupportLink('official')" title="官网">
+          <svg class="ic"><use href="#i-globe"/></svg>
+          <span>官网</span>
+        </button>
+        <button class="top-link-trigger" onclick="openSupportLink('feedback')" title="反馈问题">
+          <svg class="ic"><use href="#i-message"/></svg>
+          <span>反馈问题</span>
+        </button>
+        <button class="top-link-trigger" id="activate-license-btn" onclick="openLicenseActivation()" title="激活会员">
+          <svg class="ic"><use href="#i-key"/></svg>
+          <span>激活会员</span>
+        </button>
+        <button class="top-link-trigger cta" id="upgrade-link" onclick="openSupportLink('upgrade')" title="升级无额度版">
+          <svg class="ic"><use href="#i-crown"/></svg>
+          <span>升级无额度版</span>
+        </button>
+        <button class="top-link-trigger cta" id="renew-link" onclick="openSupportLink('renew')" title="无额度版续费" hidden>
+          <svg class="ic"><use href="#i-refresh"/></svg>
+          <span>续费</span>
+        </button>
+      </div>
+      <button class="help-trigger" onclick="openHelp()" title="使用说明">
+        <svg class="ic"><use href="#i-help"/></svg>
+        <span>使用说明</span>
+      </button>
+    </div>
+    <div class="page-container">
+
+      <!-- 翻译页 -->
+      <div id="main-page" class="page active">
+
+        <header class="page-head">
+          <h1>EngAixt</h1>
+          <p class="page-sub">游戏翻译与本地化</p>
+        </header>
+
+        <div class="drop-zone" id="drop-zone">
+          <div class="dz-icon"><svg class="ic"><use href="#i-folder-down"/></svg></div>
+          <div class="title">拖拽游戏文件夹 / .exe / Steam 快捷方式到这里</div>
+          <div class="sub">支持 .zip / .rar / .7z / .exe / .url / .lnk / appmanifest，或点击选择目录</div>
+          <div class="path-text"></div>
+        </div>
+
+        <div class="path-bar">
+          <svg class="ic"><use href="#i-folder"/></svg>
+          <input type="text" id="path-input" placeholder="尚未选择游戏路径" readonly>
+          <button class="btn btn-sm" onclick="browseFile()" title="选择 exe / Steam 快捷方式 / 压缩包">
+            <svg class="ic"><use href="#i-file"/></svg>选择文件
+          </button>
+        </div>
+
+        <!-- 引擎信息 -->
+        <div class="engine-banner" id="engine-banner" hidden>
+          <svg class="ic"><use href="#i-activity"/></svg>
+          <div class="eng-body">
+            <div class="eng-row">
+              <span class="eng-name" id="eng-name"></span>
+              <span class="eng-badge" id="eng-badge"></span>
+            </div>
+            <div class="eng-caps" id="eng-caps"></div>
+            <div class="eng-limits" id="eng-limits"></div>
+          </div>
+        </div>
+
+        <div class="panel options-panel">
+          <div class="opt">
+            <label class="opt-label" for="injector">注入方式</label>
+            <select id="injector">
+              <option value="">自动（推荐，BGI 使用原生启动器）</option>
+              <option value="xunity">XUnity (Unity 运行时注入)</option>
+              <option value="frida">Frida（兼容性运行时 Hook）</option>
+            </select>
+          </div>
+          <div class="opt">
+            <label class="opt-label" for="src-lang">源语言（实时翻译用）</label>
+            <select id="src-lang">
+              <option value="ja" selected>日语</option>
+              <option value="en">英语</option>
+              <option value="ko">韩语</option>
+              <option value="ru">俄语</option>
+              <option value="zh">中文</option>
+              <option value="auto">自动检测</option>
+            </select>
+          </div>
+          <div class="opt">
+            <label class="opt-label" for="coverage">覆盖率</label>
+            <div class="slider-group">
+              <input type="range" id="coverage" min="10" max="100" value="100" oninput="updateCoverage(this)">
+              <span id="coverage-val">100%</span>
+            </div>
+          </div>
+          <div class="opt">
+            <label class="switch">
+              <input type="checkbox" id="auto-launch" checked>
+              <span class="track"></span>
+              <span class="sw-label">完成后自动启动</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="actions-row">
+          <button class="btn btn-primary actions-btn" id="start-btn" onclick="startTranslation()">
+            <svg class="ic"><use href="#i-rocket"/></svg>开始翻译
+          </button>
+          <button class="btn btn-primary actions-btn" onclick="startRealtime()">
+            <svg class="ic"><use href="#i-activity"/></svg>实时翻译
+          </button>
+          <button class="btn actions-btn" onclick="extractOnly()">
+            <svg class="ic"><use href="#i-download"/></svg>仅提取
+          </button>
+          <button class="btn actions-btn" onclick="patchFromJson()">
+            <svg class="ic"><use href="#i-import"/></svg>从 JSON 回填
+          </button>
+          <button class="btn actions-btn" onclick="polishTranslation()" title="使用已有检查点低成本优化中文译文">
+            <svg class="ic"><use href="#i-spark"/></svg>文本润色
+          </button>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-meta">
+            <span class="progress-label" id="status-step">就绪</span>
+            <span id="status-pct" hidden></span>
+            <span class="progress-text" id="progress-text">0%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="stats-row" id="stats-row" hidden>
+            <span class="stat" id="stat-texts"><svg class="ic"><use href="#i-terminal"/></svg><span id="stat-text-count">0</span> 条文本</span>
+            <span class="stat" id="stat-translated"><svg class="ic"><use href="#i-check"/></svg><span id="stat-trans-cur">0</span> / <span id="stat-trans-total">0</span> 已翻译</span>
+            <span class="stat dim" id="stat-files"><span id="stat-file-count">0</span> 个文件</span>
+          </div>
+        </div>
+
+        <div class="log-panel">
+          <div class="log-head">
+            <svg class="ic"><use href="#i-terminal"/></svg>
+            <span>运行日志</span>
+            <button class="log-clear" onclick="clearLog()">清空</button>
+          </div>
+          <div class="log-area" id="log-area" data-empty="等待任务输出…"></div>
+        </div>
+
+      </div>
+
+      <!-- 游戏库页（平铺网格） -->
+      <div id="games-page" class="page">
+        <div class="games-backdrop" id="games-backdrop" aria-hidden="true">
+          <div class="backdrop-layer" id="backdrop-a"></div>
+          <div class="backdrop-layer" id="backdrop-b"></div>
+          <div class="backdrop-veil"></div>
+        </div>
+        <div class="games-page-inner">
+          <header class="games-header">
+            <button class="btn btn-sm" onclick="navTo('main')">
+              <svg class="ic"><use href="#i-back"/></svg>返回
+            </button>
+            <h1>已翻译的游戏</h1>
+            <button class="btn btn-sm" onclick="toggleFullscreen()" title="全屏">
+              <svg class="ic"><use href="#i-fullscreen"/></svg>
+            </button>
+          </header>
+          <div class="games-toolbar">
+            <label class="games-search" for="game-search">
+              <svg class="ic"><use href="#i-search"/></svg>
+              <input id="game-search" type="search" placeholder="搜索游戏、路径、引擎" oninput="applyGameLibraryFilters()">
+            </label>
+            <select id="game-engine-filter" onchange="applyGameLibraryFilters()" title="筛选引擎">
+              <option value="">全部引擎</option>
+            </select>
+            <select id="game-sort" onchange="applyGameLibraryFilters()" title="排序">
+              <option value="updated_desc">最近更新</option>
+              <option value="created_desc">最近添加</option>
+              <option value="name_asc">名称 A-Z</option>
+              <option value="engine_asc">引擎 A-Z</option>
+            </select>
+            <label class="card-size-slider" title="卡牌尺寸">
+              <svg class="ic" style="width:12px;height:12px;flex-shrink:0"><rect x="3" y="6" width="5" height="5" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="10" y="3" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <input type="range" id="card-scale" min="70" max="150" value="100" oninput="onCardScaleChange()">
+              <svg class="ic" style="width:14px;height:14px;flex-shrink:0"><rect x="2" y="2" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            </label>
+            <span class="games-count" id="games-count"></span>
+          </div>
+          <div class="carousel-wrapper">
+            <div class="carousel-stage" id="carousel-stage">
+              <div class="carousel-track" id="carousel-track">
+                <p id="carousel-loading" style="color: var(--text-dim); text-align: center; padding: 80px 0;">加载中...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="license-activation-overlay">
+  <div class="overlay-content license-activation-content">
+    <div class="modal-head">
+      <h2>激活会员</h2>
+      <button class="icon-btn" onclick="closeLicenseActivation()" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="field">
+      <label for="license-code-input">月度会员激活码</label>
+      <textarea id="license-code-input" class="mono license-code-input" spellcheck="false" placeholder="EAI2..."></textarea>
+    </div>
+    <div class="license-activation-result" id="license-activation-result" role="status" hidden></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeLicenseActivation()">取消</button>
+      <button class="btn" onclick="pasteLicenseCode()"><svg class="ic"><use href="#i-import"/></svg>粘贴</button>
+      <button class="btn btn-primary" id="license-activate-submit" onclick="activateMonthlyMember()"><svg class="ic"><use href="#i-key"/></svg>激活</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 使用说明 ── -->
+<div class="overlay" id="help-overlay">
+  <div class="overlay-content help-content">
+    <div class="modal-head">
+      <h2>使用说明</h2>
+      <button class="icon-btn" onclick="closeHelp()" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+
+    <div class="help-layout">
+      <aside class="help-nav" aria-label="引擎说明导航">
+        <div class="help-nav-title">引擎说明</div>
+        <button type="button" onclick="jumpHelpEngine('help-engine-bgi', this)">BGI / Ethornell</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-rpgmaker', this)">RPG Maker</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-renpy', this)">Ren'Py</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-xunity', this)">Unity / XUnity</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-unity-arch', this)">Unity @ARCH000</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-unity-assets', this)">Unity 资源直写</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-godot-pck', this)">Godot PCK</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-godot-frida', this)">Godot 加密 PCK</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-godot-plain', this)">Godot 明文工程</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-gamemaker', this)">GameMaker</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-tyrano', this)">TyranoScript</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-kirikiri', this)">吉里吉里</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-unreal', this)">Unreal Engine</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-wolf', this)">Wolf RPG</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-generic', this)">通用文本扫描</button>
+      </aside>
+
+      <div class="help-scroll" id="help-scroll">
+        <div class="help-grid">
+      <section class="help-block help-wide">
+        <div class="help-kicker">基础流程</div>
+        <ol class="help-steps">
+          <li><span>拖入游戏目录、游戏 exe、Steam 快捷方式或压缩包；工具会先解析真实目录，再进行引擎识别。</span></li>
+          <li><span>查看识别出的引擎和候选结果。普通用户保持“注入方式：自动”即可，管线会按引擎选择静态回填或运行时注入。</span></li>
+          <li><span>普通可回填引擎点击“开始翻译”。流程会依次执行提取文本、缓存命中、AI 翻译、校验、回填、生成启动器和写入诊断数据。</span></li>
+          <li><span>KRKR、Unity / XUnity 和 Unity @ARCH000 只能点击“实时翻译”；点击“开始翻译”会弹出提示，不会进入静态流程。</span></li>
+          <li><span>完成后优先从“游戏库”启动；也可以进入游戏目录，运行管线生成的汉化启动器或原游戏 exe。</span></li>
+        </ol>
+      </section>
+
+      <section class="help-block help-wide">
+        <div class="help-kicker">常用按钮和结果文件</div>
+        <div class="help-note-grid">
+          <div class="help-note">
+            <strong>开始翻译</strong>
+            <span>完整流水线：提取、翻译、回填、部署启动器。适用于 BGI、RPG Maker、Ren'Py、Godot PCK、TyranoScript 等可静态回填的引擎。</span>
+          </div>
+          <div class="help-note">
+            <strong>实时翻译</strong>
+            <span>KRKR 和 Unity 的唯一入口。KRKR 会启动原生 hook 与独立字幕窗口；Unity 会部署 XUnity / BepInEx 运行时翻译。</span>
+          </div>
+          <div class="help-note">
+            <strong>仅提取</strong>
+            <span>只看文本覆盖率和引擎识别是否正确，不调用翻译 API，适合排查“为什么文本少”。</span>
+          </div>
+          <div class="help-note">
+            <strong>从 JSON 回填</strong>
+            <span>复用已有译文文件重新写回游戏，适合修改术语、补翻、或重新打包。</span>
+          </div>
+          <div class="help-note">
+            <strong>游戏库</strong>
+            <span>展示已经翻译过的游戏。点击卡牌启动汉化版，文件夹按钮只打开目录。</span>
+          </div>
+          <div class="help-note">
+            <strong>费用统计</strong>
+            <span>每次任务会写入 <code>_translation_meta/api_cache_stats.json</code>，包含缓存命中、API 请求数和估算费用。</span>
+          </div>
+          <div class="help-note">
+            <strong>任务元数据</strong>
+            <span><code>_translation_meta</code> 保存启动器、诊断、缓存统计和引擎需要的运行文件，不建议手动删除。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="help-block help-wide">
+        <div class="help-kicker">引擎说明</div>
+        <div class="engine-help-grid">
+          <section class="engine-help-card" id="help-engine-bgi">
+            <div class="engine-help-head">
+              <h3>BGI / Ethornell</h3>
+              <span class="help-status beta">Beta</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>常见 BGI、Ethornell、Buriko 游戏，目录里通常有 <code>.arc</code>、<code>BGI.gdb</code>、<code>sysprg.arc</code> 或 <code>system.arc</code>。</dd></div>
+              <div><dt>流程</dt><dd>自动解包脚本、提取文本、DSC 重新压缩、静态回填，并生成原生汉化启动器。</dd></div>
+              <div><dt>启动</dt><dd>优先使用 <code>启动汉化版.bat</code>。已部署 <code>sjis_ext.bin</code> 和原生显示 hook，不再依赖 Python 或 Frida。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-rpgmaker">
+            <div class="engine-help-head">
+              <h3>RPG Maker</h3>
+              <span class="help-status stable">稳定版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>MV、MZ、XP、VX、VXAce。常见特征是 <code>www/data</code>、<code>Data</code>、<code>Game.rpgproject</code>、<code>.rvdata2</code> 或 <code>.rgss3a</code>。</dd></div>
+              <div><dt>流程</dt><dd>提取事件、地图、公共事件、数据库文本；按版本选择 JSON、Marshal 数据或运行时替换路径。</dd></div>
+              <div><dt>注意</dt><dd>选项、对白、系统词会分类型处理。翻译后从游戏库启动即可，旧版 RGSS 游戏可能需要检查字体显示。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-renpy">
+            <div class="engine-help-head">
+              <h3>Ren'Py</h3>
+              <span class="help-status stable">稳定版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>目录里有 <code>renpy</code>、<code>game</code>、<code>.rpy</code>、<code>.rpyc</code> 或 <code>.rpa</code> 的视觉小说。</dd></div>
+              <div><dt>流程</dt><dd>自动处理脚本文本、菜单选项和翻译字符串；有 <code>.rpa</code> 时会尝试解包后再扫描。</dd></div>
+              <div><dt>注意</dt><dd>保留变量和方括号表达式，例如 <code>[player]</code>。若游戏已有多语言文件，可用 JSON 回填做二次修正。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-xunity">
+            <div class="engine-help-head">
+              <h3>Unity / XUnity</h3>
+              <span class="help-status stable">稳定版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>标准 Unity Mono 或 IL2CPP 游戏，常见特征是 <code>*_Data</code>、<code>UnityPlayer.dll</code>、<code>GameAssembly.dll</code>。</dd></div>
+              <div><dt>流程</dt><dd>只能点击“实时翻译”。工具会部署 BepInEx、XUnity.AutoTranslator、字体和翻译缓存，不直接破坏原资源。</dd></div>
+              <div><dt>启动</dt><dd>不要走“开始翻译”。从“实时翻译”、游戏库或原 exe 启动都会加载部署好的运行时翻译文件，首次启动可能需要等待插件初始化。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-unity-arch">
+            <div class="engine-help-head">
+              <h3>Unity @ARCH000 Lua VN</h3>
+              <span class="help-status beta">Beta</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>部分 Unity 视觉小说使用 <code>@ARCH000</code> 一类 Lua 归档保存脚本文本。</dd></div>
+              <div><dt>流程</dt><dd>当前 GUI 统一归入 Unity 实时路线，只能点击“实时翻译”，由 XUnity 运行时捕获和替换显示文本。</dd></div>
+              <div><dt>注意</dt><dd>静态 Lua 归档回填保留为后续专用能力，不作为普通用户入口；若需要排查覆盖率，可先用“仅提取”。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-unity-assets">
+            <div class="engine-help-head">
+              <h3>Unity 资源直写</h3>
+              <span class="help-status partial">部分支持</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>不适合 XUnity 的 Unity 游戏，或需要尝试直接处理 <code>.assets</code> 明文字符串的情况。</dd></div>
+              <div><dt>流程</dt><dd>资源直写保留为内部/实验路径；GUI 普通入口不再让 Unity 走“开始翻译”，避免低覆盖率静态替换误导用户。</dd></div>
+              <div><dt>注意</dt><dd>若目标是“能玩到中文”，优先点击“实时翻译”走 XUnity。只有明确需要研究资源结构时再看提取结果。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-godot-pck">
+            <div class="engine-help-head">
+              <h3>Godot PCK / Dialogic</h3>
+              <span class="help-status beta">Beta</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>Godot 游戏的独立 <code>.pck</code> 或 exe 内嵌 PCK，尤其是使用 Dialogic <code>.dtl</code> 剧情脚本的游戏。</dd></div>
+              <div><dt>流程</dt><dd>解出 PCK，提取 <code>.dtl</code>、<code>.tscn</code>、<code>.tres</code> 等文本，回填后重建 PCK 或替换内嵌数据。</dd></div>
+              <div><dt>注意</dt><dd>会尽量保留事件 ID、标签、命令和控制符。若开场剧情丢失，优先检查 DTL 和事件 ID 是否保持原样。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-godot-frida">
+            <div class="engine-help-head">
+              <h3>Godot 加密 PCK</h3>
+              <span class="help-status beta">Beta</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>普通 PCK 路线无法直接解包、文本需要运行时观察或 Frida 辅助的 Godot 游戏。</dd></div>
+              <div><dt>流程</dt><dd>通过运行时 hook 和已有翻译缓存替换显示文本，必要时复用 Godot PCK 的 DTL/资源补丁逻辑。</dd></div>
+              <div><dt>注意</dt><dd>自动模式会优先选择更稳的静态 PCK 路线；只有检测到加密或静态不可行时才走运行时方案。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-godot-plain">
+            <div class="engine-help-head">
+              <h3>Godot 明文工程</h3>
+              <span class="help-status partial">部分支持</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>目录里直接存在 <code>.gd</code>、<code>.tscn</code>、<code>.tres</code>、<code>.translation</code> 等明文资源的 Godot 游戏。</dd></div>
+              <div><dt>流程</dt><dd>扫描常见文本字段、按钮文本、标签文本和资源描述，能安全回填的内容会写回。</dd></div>
+              <div><dt>注意</dt><dd>如果游戏实际封在 PCK 里，应由 Godot PCK 引擎处理；明文工程路径主要用于已解包或开发版目录。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-gamemaker">
+            <div class="engine-help-head">
+              <h3>GameMaker / YoYo</h3>
+              <span class="help-status partial">部分支持</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>有 <code>data.win</code> 的 GameMaker 游戏，例如部分 YoYo 引擎独立游戏。</dd></div>
+              <div><dt>流程</dt><dd>从 STRG 字符串表和主程序数据段提取文本；能放回原槽位的译文会安全回填。</dd></div>
+              <div><dt>注意</dt><dd>超长中文可能被跳过，覆盖率不一定完整。像素字体、字号和可读性通常需要单独检查。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-tyrano">
+            <div class="engine-help-head">
+              <h3>TyranoScript / TyranoBuilder</h3>
+              <span class="help-status experimental">实验性</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>目录里有 <code>data/scenario</code>、<code>package.json</code> 和 <code>tyrano/plugins/kag</code>，或这些资源被封装在 NW.js 游戏 exe 内。</dd></div>
+              <div><dt>流程</dt><dd>点击“开始翻译”。工具会结构化提取 <code>.ks</code> 可见文本，使用当前翻译器处理，再精确写回松散脚本或 exe 内嵌 ZIP。</dd></div>
+              <div><dt>安全</dt><dd>脚本标签、资源路径、变量和动态金额表达式不会送去翻译；内嵌 exe 会先集中备份，回填后重新打开 ZIP 逐条校验。</dd></div>
+              <div><dt>注意</dt><dd>目前只完成一个真实游戏样本，仍属实验支持。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留 <code>_translation_meta</code> 诊断数据。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-kirikiri">
+            <div class="engine-help-head">
+              <h3>吉里吉里 / KiriKiri</h3>
+              <span class="help-status beta">Beta 版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>默认流程</dt><dd>只能点击“实时翻译”。工具按 LunaTranslator 思路走原生 hook，捕获 KAGParser 等显示文本，并在独立字幕窗口显示中文。</dd></div>
+              <div><dt>显示方式</dt><dd>人名和正文分通道处理；已有译文优先读本地映射，新文本可实时补译，并写入 <code>_translation_meta</code> 供后续复用。</dd></div>
+              <div><dt>启动</dt><dd>GUI 实时翻译会直接拉起 native runtime 和字幕窗口，不再经过 bat / PowerShell。目录里的 <code>启动汉化版.bat</code> 只是便携备用入口。</dd></div>
+              <div><dt>静态脚本</dt><dd><code>.ks</code>、<code>.tjs</code>、普通 XP3 / SCN 的提取能力保留为辅助诊断和后续补翻基础，不再作为 KRKR 默认翻译入口。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-unreal">
+            <div class="engine-help-head">
+              <h3>Unreal Engine</h3>
+              <span class="help-status partial">部分支持</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>有 <code>.pak</code>、<code>.utoc</code>、<code>.ucas</code>、<code>Content</code> 或 <code>.uproject</code> 的 Unreal 游戏。</dd></div>
+              <div><dt>流程</dt><dd>优先扫描已解包或明文本地化资源；如果配置了 UnrealPak，会尝试解包部分 <code>.pak</code>。</dd></div>
+              <div><dt>注意</dt><dd>IoStore 和大多数 <code>.uasset</code> 二进制回填尚未自动化，通常需要 FModel、UnrealPak 或 UE 专用流程配合。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-wolf">
+            <div class="engine-help-head">
+              <h3>WOLF RPG Editor</h3>
+              <span class="help-status beta">测试版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>Wolf RPG Editor 游戏，常见特征是 <code>Data.wolf</code>、<code>Game.dat</code> 等资源。</dd></div>
+              <div><dt>流程</dt><dd>使用 UberWolf 自动识别密钥并解包，结构化提取地图、公共事件和数据库文本，翻译后重新打包。</dd></div>
+              <div><dt>覆盖</dt><dd>支持普通目录、标准 WOLF 归档及 UberWolf 可识别的 Pro 保护，不依赖运行时实时翻译。</dd></div>
+              <div><dt>注意</dt><dd>当前为测试版；自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-generic">
+            <div class="engine-help-head">
+              <h3>通用文本扫描</h3>
+              <span class="help-status partial">兜底</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>没有匹配到专用引擎，但目录里有 <code>.txt</code>、<code>.json</code>、<code>.csv</code>、<code>.xml</code>、<code>.ini</code>、<code>.lua</code> 等明文文件。</dd></div>
+              <div><dt>流程</dt><dd>只扫描明文资源，过滤配置键和明显不是玩家可见文本的内容。</dd></div>
+              <div><dt>注意</dt><dd>如果某个封包游戏落到这里，通常说明专用引擎未识别或资源被加密；文本条数很少时不要急着翻译，先检查识别结果。</dd></div>
+            </dl>
+          </section>
+        </div>
+      </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 设置弹窗 ── -->
+<div class="overlay" id="settings-overlay">
+  <div class="overlay-content">
+    <div class="modal-head">
+      <h2>设置</h2>
+      <button class="icon-btn" onclick="closeSettings()" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+
+    <div class="tabs">
+      <button data-tab="api" class="active" onclick="switchTab('api')">云端模型</button>
+      <button data-tab="local-model" onclick="switchTab('local-model')">本地模型</button>
+      <button data-tab="trans" onclick="switchTab('trans')">翻译设置</button>
+      <button data-tab="overlay-ui" onclick="switchTab('overlay-ui')">字幕窗口</button>
+      <button data-tab="lang" onclick="switchTab('lang')">多语言</button>
+      <button data-tab="tools" onclick="switchTab('tools')">工具路径</button>
+      <button data-tab="look" onclick="switchTab('look')">外观</button>
+    </div>
+
+    <!-- 云端模型 -->
+    <div class="tab-panel active" id="tab-api">
+      <div class="field"><label>OpenAI API Key</label><div class="secret-input"><input type="password" class="mono" name="openai_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('openai_api_key')" aria-label="显示 OpenAI API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>OpenAI 模型</label><select name="openai_model"><option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option><option value="gpt-5.5">GPT-5.5</option><option value="gpt-5.5-pro">GPT-5.5 Pro</option><option value="gpt-5.4">GPT-5.4</option><option value="gpt-5.4-pro">GPT-5.4 Pro</option><option value="gpt-5.4-nano">GPT-5.4 nano</option><option value="gpt-4.1">GPT-4.1</option><option value="gpt-4.1-mini">GPT-4.1 mini</option><option value="gpt-4o">GPT-4o（旧版）</option><option value="gpt-4o-mini">GPT-4o mini（旧版）</option></select></div>
+      <div class="field"><label>DeepSeek API Key</label><div class="secret-input"><input type="password" class="mono" name="deepseek_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('deepseek_api_key')" aria-label="显示 DeepSeek API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>DeepSeek 模型</label><select name="deepseek_model"><option value="deepseek-v4-flash">深度求索 V4 Flash（推荐）</option><option value="deepseek-v4-pro">深度求索 V4 Pro</option><option value="deepseek-chat">深度求索 Chat（兼容）</option><option value="deepseek-reasoner">深度求索 Reasoner（推理）</option></select></div>
+      <div class="field"><label>通义千问 API Key</label><div class="secret-input"><input type="password" class="mono" name="qwen_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('qwen_api_key')" aria-label="显示通义千问 API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>通义千问模型</label><select name="qwen_model"><option value="qwen3.7-plus">千问 3.7 Plus（推荐）</option><option value="qwen3.7-max">千问 3.7 Max</option><option value="qwen3.6-flash">千问 3.6 Flash（低成本）</option><option value="qwen-plus">千问 Plus（兼容旧版）</option><option value="qwen-turbo">千问 Turbo（兼容旧版）</option></select></div>
+      <div class="field"><label>智谱 GLM API Key</label><div class="secret-input"><input type="password" class="mono" name="zhipu_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('zhipu_api_key')" aria-label="显示智谱 GLM API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>智谱 GLM 模型</label><select name="zhipu_model"><option value="glm-4.7-flash">智谱 GLM-4.7 Flash（推荐）</option><option value="glm-5.2">智谱 GLM-5.2</option><option value="glm-5.1">智谱 GLM-5.1</option><option value="glm-5">智谱 GLM-5</option><option value="glm-4.7">智谱 GLM-4.7</option><option value="glm-4-flash">智谱 GLM-4 Flash（兼容旧版）</option></select></div>
+      <div class="field"><label>Kimi API Key</label><div class="secret-input"><input type="password" class="mono" name="moonshot_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('moonshot_api_key')" aria-label="显示 Kimi API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>Kimi 模型</label><select name="moonshot_model"><option value="kimi-k2.6">Kimi K2.6（推荐）</option><option value="kimi-k2.7-code">Kimi K2.7 Code</option><option value="moonshot-v1-8k">月之暗面 V1 8K（兼容）</option><option value="moonshot-v1-32k">月之暗面 V1 32K</option><option value="moonshot-v1-128k">月之暗面 V1 128K</option></select></div>
+      <div class="field"><label>火山方舟 API Key</label><div class="secret-input"><input type="password" class="mono" name="doubao_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('doubao_api_key')" aria-label="显示火山方舟 API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>火山方舟模型 / Endpoint</label><select name="doubao_model"><option value="doubao-seed-2-1-turbo-260628">豆包 Seed 2.1 Turbo（推荐）</option><option value="doubao-seed-2-1-pro-260628">豆包 Seed 2.1 Pro</option><option value="doubao-seed-evolving">豆包 Seed Evolving（持续进化）</option><option value="doubao-seed-1-6-flash-250615">豆包 Seed 1.6 Flash（兼容旧版）</option><option value="doubao-seed-1-6-250615">豆包 Seed 1.6</option></select></div>
+      <div class="field"><label>Anthropic API Key</label><div class="secret-input"><input type="password" class="mono" name="anthropic_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('anthropic_api_key')" aria-label="显示 Anthropic API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
+      <div class="field"><label>Claude 模型</label><select name="anthropic_model"><option value="claude-sonnet-5">Claude Sonnet 5（推荐）</option><option value="claude-fable-5">Claude Fable 5</option><option value="claude-opus-4-8">Claude Opus 4.8</option><option value="claude-haiku-4-5">Claude Haiku 4.5</option><option value="claude-sonnet-4-6">Claude Sonnet 4.6（旧版）</option><option value="claude-haiku-4-5-20251001">Claude Haiku 4.5（旧版带日期）</option></select></div>
+    </div>
+
+    <!-- 本地模型 -->
+    <div class="tab-panel" id="tab-local-model">
+      <div class="field-grid">
+        <div class="field"><label>本地每批条数</label><input type="text" inputmode="numeric" pattern="[0-9]*" name="hy_mt2_batch_size"></div>
+        <div class="field">
+          <label>上下文长度</label>
+          <select name="hy_mt2_context_size">
+            <option value="2048">2048</option>
+            <option value="4096">4096（推荐）</option>
+            <option value="8192">8192</option>
+            <option value="16384">16384</option>
+          </select>
+        </div>
+        <div class="field"><label>空闲释放时间（秒）</label><input type="text" inputmode="numeric" pattern="[0-9]*" name="hy_mt2_idle_timeout_seconds"></div>
+        <div class="field"><label>推理队列</label><input type="text" value="单实例串行" disabled></div>
+      </div>
+      <div class="settings-note local-model-scope-note">本地模型只使用本页参数；云端每批条数、云端并发数和 API 设置不会参与本地推理。</div>
+      <div class="hy-mt2-component" id="hy-mt2-component">
+        <div class="hy-mt2-component-head">
+          <div>
+            <strong>Hy-MT2 离线组件</strong>
+            <span id="hy-mt2-status-badge" class="hy-mt2-status-badge">检查中</span>
+          </div>
+          <span id="hy-mt2-size" class="hy-mt2-size"></span>
+        </div>
+        <div id="hy-mt2-status" class="settings-note">正在检查离线组件…</div>
+        <div class="hy-mt2-actions">
+          <button type="button" class="btn secondary" id="hy-mt2-install-btn" onclick="installHyMt2()"><svg class="ic"><use href="#i-download"/></svg>下载/修复离线组件</button>
+          <button type="button" class="icon-btn" id="hy-mt2-remove-btn" onclick="removeHyMt2()" title="删除离线组件" aria-label="删除离线组件" hidden><svg class="ic"><use href="#i-trash"/></svg></button>
+        </div>
+        <div class="settings-note hy-mt2-note">模型和运行器从腾讯 ModelScope 与 llama.cpp 官方源下载，不计入安装包；翻译完全在本机运行，不消耗试用额度。</div>
+      </div>
+    </div>
+
+    <!-- 翻译设置 -->
+    <div class="tab-panel" id="tab-trans">
+      <div class="field"><label>当前翻译器</label><select name="active_translator" onchange="onTranslatorChanged(this.value)"><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="zhipu">智谱 GLM</option><option value="moonshot">Kimi</option><option value="doubao">豆包 / 火山方舟</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="hy_mt2">腾讯 Hy-MT2（离线）</option></select></div>
+      <div class="field"><label>目标语言</label><select name="target_lang" onchange="syncSettingValue('target_lang', this.value)"><option>zh-CN</option><option>zh-TW</option><option>en</option><option>ja</option><option>ko</option></select></div>
+      <div class="field-grid" id="cloud-translation-settings" data-cloud-only>
+        <div class="field"><label>云端每批最大条数</label><input type="text" name="max_batch_size"></div>
+        <div class="field"><label class="label-with-action">云端最大并发数<button type="button" class="field-alert-btn" onclick="showConcurrencyWarning()" title="云端并发数提示" aria-label="云端并发数提示">!</button></label><input type="text" name="max_concurrency"></div>
+      </div>
+      <div class="field"><label>翻译覆盖率 (%)</label><input type="text" name="translation_coverage"></div>
+      <div class="field"><label>最低通过覆盖率 (%)</label><input type="text" name="minimum_translation_coverage"></div>
+      <div class="field cache-setting-field">
+        <label class="switch">
+          <input type="checkbox" name="translation_cache_enabled">
+          <span class="track"></span>
+          <span class="sw-label">开启翻译缓存</span>
+        </label>
+        <div class="settings-note cache-note">
+          开启缓存会更便宜；翻译的游戏越多，跨游戏常见文本、人名、选项和 UI 命中越多，长期越省钱。
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="translation_cache_auto_cleanup">
+            <span class="track"></span>
+            <span class="sw-label">缓存超过上限自动清理</span>
+          </label>
+        </div>
+        <div class="field"><label>缓存上限（GB，默认 1）</label><input type="text" name="translation_cache_max_size_gb"></div>
+      </div>
+      <div class="settings-note cache-note">自动清理只删除最旧的全局译文缓存，不会删除游戏目录、汉化文件或每个游戏的元数据。</div>
+      <div class="field">
+        <label>KRKR 补翻模式</label>
+        <select name="kirikiri_runtime_completion_mode">
+          <option value="captured_only">只补运行时捕获文本</option>
+          <option value="coverage">捕获 + 检查点，遵循覆盖率</option>
+          <option value="all">完整检查点补齐</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="switch">
+          <input type="checkbox" name="kirikiri_runtime_merge_captures">
+          <span class="track"></span>
+          <span class="sw-label">续翻时合并运行时捕获的新文本</span>
+        </label>
+      </div>
+      <div class="field"><label>启用的引擎（逗号分隔，留空 = 全部）</label><input type="text" class="mono" name="engine_whitelist" placeholder="renpy, rpgmaker, unity, godot, ..."></div>
+      <div class="field">
+        <label class="switch">
+          <input type="checkbox" name="keep_workspace">
+          <span class="track"></span>
+          <span class="sw-label">保留工作目录（调试用）</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 字幕窗口 -->
+    <div class="tab-panel" id="tab-overlay-ui">
+      <div class="field-grid">
+        <div class="field"><label>字体</label><input type="text" name="kirikiri_overlay_font_family"></div>
+        <div class="field">
+          <label>译文字号 <span class="range-value" data-for="kirikiri_overlay_font_size">18</span></label>
+          <input type="range" name="kirikiri_overlay_font_size" min="12" max="42" step="1" oninput="updateRangeValue(this)">
+        </div>
+        <div class="field">
+          <label>原文字号 <span class="range-value" data-for="kirikiri_overlay_original_font_size">11</span></label>
+          <input type="range" name="kirikiri_overlay_original_font_size" min="8" max="28" step="1" oninput="updateRangeValue(this)">
+        </div>
+        <div class="field"><label>窗口高度</label><input type="text" name="kirikiri_overlay_height"></div>
+        <div class="field"><label>最大宽度</label><input type="text" name="kirikiri_overlay_max_width"></div>
+        <div class="field"><label>透明度 (0.30-1.00)</label><input type="text" name="kirikiri_overlay_opacity"></div>
+        <div class="field"><label>无窗口超时（秒）</label><input type="text" name="kirikiri_no_window_timeout_seconds"></div>
+      </div>
+      <div class="field-grid">
+        <div class="field"><label>背景色</label><input type="color" name="kirikiri_overlay_bg_color"></div>
+        <div class="field"><label>译文颜色</label><input type="color" name="kirikiri_overlay_text_color"></div>
+        <div class="field"><label>说话人颜色</label><input type="color" name="kirikiri_overlay_speaker_color"></div>
+        <div class="field"><label>原文颜色</label><input type="color" name="kirikiri_overlay_original_color"></div>
+        <div class="field"><label>待翻译颜色</label><input type="color" name="kirikiri_overlay_pending_color"></div>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_text_only">
+            <span class="track"></span>
+            <span class="sw-label">字幕纯文本模式</span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_show_original">
+            <span class="track"></span>
+            <span class="sw-label">显示原文行</span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_show_speaker">
+            <span class="track"></span>
+            <span class="sw-label">显示说话人</span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_live_translate">
+            <span class="track"></span>
+            <span class="sw-label">实时补译新文本</span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_follow_window">
+            <span class="track"></span>
+            <span class="sw-label">自动跟随游戏窗口</span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_locked">
+            <span class="track"></span>
+            <span class="sw-label">锁定窗口位置</span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="kirikiri_overlay_remember_position">
+            <span class="track"></span>
+            <span class="sw-label">记住窗口位置</span>
+          </label>
+        </div>
+      </div>
+      <div class="settings-note">这些设置作用于 KRKR 原生显示层 hook 的独立字幕窗口；字号、颜色、宽高、跟随与锁定会应用到当前窗口，字幕纯文本模式切换下次启动生效。</div>
+    </div>
+
+    <!-- 多语言 -->
+    <div class="tab-panel" id="tab-lang">
+      <div class="field-grid">
+        <div class="field">
+          <label>界面语言</label>
+          <select name="ui_language" onchange="setUiLanguage(this.value, true)">
+            <option value="zh-CN">简体中文</option>
+            <option value="zh-TW">繁體中文</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>默认目标语言</label>
+          <select name="target_lang" onchange="syncSettingValue('target_lang', this.value)">
+            <option value="zh-CN">简体中文</option>
+            <option value="zh-TW">繁體中文</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>语言说明</label>
+        <div class="settings-note">界面语言用于后续多语言 UI；默认目标语言会同步到翻译任务。</div>
+      </div>
+    </div>
+
+    <!-- 外观 -->
+    <div class="tab-panel" id="tab-look">
+      <div class="field"><label>背景色</label><input type="color" name="bg_color" id="bg-picker" value="#08080d" onchange="setBgColor(this.value)"></div>
+      <div class="field"><label>背景图片</label>
+        <div class="input-row">
+          <input type="text" class="mono" id="bg-image-path" readonly placeholder="未选择">
+          <button class="btn btn-sm" onclick="pickBgImage()">选择...</button>
+          <button class="btn btn-sm" onclick="clearBgImage()" id="clear-bg-btn" hidden>清除</button>
+        </div>
+      </div>
+      <div class="field"><label>主色调</label><input type="color" name="ui_accent" id="accent-picker"></div>
+      <div class="preset-row">
+        <span class="preset-label">预设</span>
+        <button class="preset-dot" style="background:#8b7cff" onclick="applyPreset('#8b7cff')" title="紫"></button>
+        <button class="preset-dot" style="background:#6366f1" onclick="applyPreset('#6366f1')" title="靛蓝"></button>
+        <button class="preset-dot" style="background:#3b82f6" onclick="applyPreset('#3b82f6')" title="蓝"></button>
+        <button class="preset-dot" style="background:#10b981" onclick="applyPreset('#10b981')" title="绿"></button>
+        <button class="preset-dot" style="background:#f59e0b" onclick="applyPreset('#f59e0b')" title="金"></button>
+        <button class="preset-dot" style="background:#ef4444" onclick="applyPreset('#ef4444')" title="红"></button>
+        <button class="preset-dot" style="background:#ec4899" onclick="applyPreset('#ec4899')" title="粉"></button>
+      </div>
+    </div>
+
+    <!-- 工具路径 -->
+    <div class="tab-panel" id="tab-tools">
+      <div class="field-grid">
+        <div class="field"><label>Frida 超时（秒）</label><input type="text" name="frida_timeout"></div>
+        <div class="field"><label>工具目录</label><input type="text" class="mono" name="tools_dir"></div>
+      </div>
+      <div class="field">
+        <label class="switch">
+          <input type="checkbox" name="auto_download_tools">
+          <span class="track"></span>
+          <span class="sw-label">自动下载缺失的工具</span>
+        </label>
+      </div>
+      <div class="field">
+        <label class="switch">
+          <input type="checkbox" name="auto_update_tools">
+          <span class="track"></span>
+          <span class="sw-label">自动更新已安装的托管工具</span>
+        </label>
+      </div>
+      <div class="field-grid">
+        <div class="field"><label>更新检查间隔（小时，默认120=5天）</label><input type="text" name="tool_update_interval_hours"></div>
+        <div class="field tool-action-field">
+          <label>手动维护</label>
+          <button class="btn btn-sm" onclick="updateTools()">检查工具更新</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>软件更新</label>
+        <div class="settings-note" id="app-update-info">当前版本：读取中</div>
+      </div>
+      <div class="field"><label>CJK 字体路径</label>
+        <div class="input-row">
+          <input type="text" class="mono" name="cjk_font_path">
+          <button class="btn btn-sm" onclick="browseCjkFont()">浏览...</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="i18n.js"></script>
+<script src="local_model_settings.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

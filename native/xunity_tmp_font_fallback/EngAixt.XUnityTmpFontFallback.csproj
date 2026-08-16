@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>EngAixt.XUnityTmpFontFallback</AssemblyName>
+    <RootNamespace>EngAixt.XUnityTmpFontFallback</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BepInExRoot Condition="'$(BepInExRoot)' == ''">$(ENGAIXT_BEPINEX_ROOT)</BepInExRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx.Core" HintPath="$(BepInExRoot)\core\BepInEx.Core.dll" Private="false" />
+    <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(BepInExRoot)\core\BepInEx.Unity.IL2CPP.dll" Private="false" />
+    <Reference Include="Il2CppInterop.Runtime" HintPath="$(BepInExRoot)\core\Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="Il2Cppmscorlib" HintPath="$(BepInExRoot)\interop\Il2Cppmscorlib.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(BepInExRoot)\interop\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AssetBundleModule" HintPath="$(BepInExRoot)\interop\UnityEngine.AssetBundleModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(BepInExRoot)\interop\UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextCoreFontEngineModule" HintPath="$(BepInExRoot)\interop\UnityEngine.TextCoreFontEngineModule.dll" Private="false" />
+    <Reference Include="Unity.TextMeshPro" HintPath="$(BepInExRoot)\interop\Unity.TextMeshPro.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="RequireBepInExRoot" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(BepInExRoot)' == ''" Text="Pass -p:BepInExRoot=&lt;game BepInEx directory&gt; when building this IL2CPP plugin." />
+  </Target>
+</Project>

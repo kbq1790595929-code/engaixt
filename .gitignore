@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+*.pyo
+.backups/
+.nwjs_test/
+_tool_outputs/
+.pytest_cache/
+
+# Codex/local debugging artifacts
+.codex_runs/
+.codex_video_frames/
+tmp_video_frames/
+diagnostics/
+*.log
+
+# Build outputs
+build/
+dist/
+obj/
+bin/
+release_artifacts/
+build_data/
+
+# Debug artifacts (screenshots, probe outputs)
+artifacts/
+
+# Runtime/local state
+profiles/
+_translation_meta/
+.wrangler/
+
+# External tool download caches
+downloads/
+tools/_downloads/
+
+# Local native build toolchains/caches
+native/toolchains/

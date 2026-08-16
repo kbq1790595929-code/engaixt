@@ -1,0 +1,27 @@
+diff --git a/UberWolfLib/WolfDec.cpp b/UberWolfLib/WolfDec.cpp
+--- a/UberWolfLib/WolfDec.cpp
++++ b/UberWolfLib/WolfDec.cpp
+@@ -249,7 +249,13 @@ void WolfDec::AddAndSetKey(const std::string& name, const uint16_t& cryptVersion
+ 
+ void WolfDec::AddKey(const std::string& name, const uint16_t& cryptVersion, const bool& useOldDxArc, const Key& key)
+ {
+-	m_additionalModes.push_back({ name, cryptVersion, (useOldDxArc ? &DXArchive_VER6::DecodeArchive : &DXArchive::DecodeArchive), nullptr, key });
++	m_additionalModes.push_back({
++		name,
++		cryptVersion,
++		(useOldDxArc ? &DXArchive_VER6::DecodeArchive : &DXArchive::DecodeArchive),
++		(useOldDxArc ? &DXArchive_VER6::EncodeArchiveOneDirectory : &DXArchive::EncodeArchiveOneDirectoryWolf),
++		key,
++	});
+ }
+ 
+ tStrings WolfDec::GetEncryptionsW()
+@@ -433,7 +439,7 @@ bool WolfDec::runProcess(const tString& filePath, const uint32_t& mode, const bo
+ uint16_t WolfDec::getCryptVersion(const tString& filePath) const
+ {
+ 	// Read the DARC_HEAD from the file
+-	std::ifstream f(filePath, std::ios::binary);
++	std::ifstream f(fs::path(filePath), std::ios::binary);
+ 	if (!f.is_open())
+ 	{
+ 		ERROR_LOG << std::format(TEXT("Failed to open file: {}"), filePath) << std::endl;
