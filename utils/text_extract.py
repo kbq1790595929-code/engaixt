@@ -14,6 +14,7 @@ KIRIKIRI_PERCENT_CONTROL = r"%(?:p-?\d*|f[^;\r\n]{0,80}|n|-?\d+);"
 KIRIKIRI_EMPHASIS_MARK = r"\[・\]"
 EMPTY_BRACE_CONTROL = r"\{\}"
 ANGLE_CONTROL_TAG = r"<[^<>\r\n]{1,256}>"
+SEMANTIC_CONTROL_TOKEN = r"__[A-Z][A-Z0-9]*(?:_[a-zA-Z0-9]+)?__"
 BACKSLASH_CONTROL = (
     r"\\(?:"
     r"[A-Za-z]+(?:\[(?:[^\[\]\r\n]|\[[^\[\]\r\n]*\])*\])?"
@@ -28,7 +29,7 @@ _SOFT_RPGMAKER_DISPLAY_CODES = {r"\.", r"\|", r"\!", r"\>", r"\^", r"\n"}
 PLACEHOLDER_PATTERN = re.compile(
     r"(" + KIRIKIRI_PERCENT_CONTROL + r"|" + KIRIKIRI_EMPHASIS_MARK + r"|%[dsrfx]|%[0-9.]*[dsrfx]|\\[nrt]|\\x[0-9a-fA-F]{2}|"
     r"\{[a-zA-Z_][a-zA-Z0-9_]*\}|\{/[a-zA-Z_]+\}|\{[0-9]+\}|" + EMPTY_BRACE_CONTROL + r"|"
-    + ANGLE_CONTROL_TAG + r"|" + SQUARE_PLACEHOLDER + r"|"
+    + ANGLE_CONTROL_TAG + r"|" + SEMANTIC_CONTROL_TOKEN + r"|" + SQUARE_PLACEHOLDER + r"|"
     r"\\[NnVvCcIi]\s*\[\d+\]|"
     r"\\[\.\|!>\^]|"
     r"\\[a-zA-Z]+\b|"
@@ -771,8 +772,8 @@ _PROTECT_PATTERN = re.compile(
     + EMPTY_BRACE_CONTROL + r"|"             # Empty engine control marker: {}
     + ANGLE_CONTROL_TAG + r"|"                # Includes CJK speaker tags.
     r"@[a-zA-Z_][a-zA-Z0-9_]*\b|"            # @name, @proto1
-    r"__[A-Z][A-Z0-9]*(?:_[a-zA-Z0-9]+)?__"  # RPG Maker hook v3 semantic tokens: __COLOR_5__ __WAIT__
-    r")"
+    + SEMANTIC_CONTROL_TOKEN                    # RPG Maker semantic tokens: __COLOR_5__ __RPGM_SEGMENT__
+    + r")"
 )
 
 

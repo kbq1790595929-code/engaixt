@@ -16,6 +16,24 @@ from utils.logger import info, warning
 from utils.text_extract import is_acceptable_same_as_source, validation_source_for_item, verify_translation
 
 
+def _translation_contract(meta: object) -> str:
+    if not isinstance(meta, dict):
+        return ""
+    return str(meta.get("translation_contract") or "")
+
+
+def _required_checkpoint_contracts(game_path: Path) -> set[str]:
+    game_dir = game_path if game_path.is_dir() else game_path.parent
+    if (
+        (game_dir / "www" / "data" / "CommonEvents.json").exists()
+        or (game_dir / "data" / "CommonEvents.json").exists()
+    ):
+        from core.rpgmaker_event_extraction import RPGMAKER_MESSAGE_CONTRACT
+
+        return {RPGMAKER_MESSAGE_CONTRACT}
+    return set()
+
+
 def checkpoint_resume_candidate(pipeline, game_path: Path, file_filter: list[str] | None = None) -> Path | None:
     """Return a usable game checkpoint for fast resume without re-extracting.
 
@@ -38,6 +56,13 @@ def checkpoint_resume_candidate(pipeline, game_path: Path, file_filter: list[str
         return None
     items = data.get("items")
     if not isinstance(items, list) or not items:
+        return None
+    required_contracts = _required_checkpoint_contracts(game_path)
+    available_contracts = {
+        str(value) for value in data.get("translation_contracts", []) if value
+    }
+    if required_contracts - available_contracts:
+        info("RPGMaker 检查点使用旧逐行合同，将重新提取以避免对话错位")
         return None
     source = data.get("source")
     if source:
@@ -199,7 +224,10 @@ def load_checkpoint_into(pipeline, items: list, checkpoint: Path):
             })())
             safe, warns = verify_translation(source_for_validation, raw["translated"])
             if safe and (safe != raw["original"] or is_acceptable_same_as_source(raw["original"], safe)):
-                lookup[(raw["file"], raw.get("key", ""), raw["original"])] = safe
+                lookup[(
+                    raw["file"], raw.get("key", ""), raw["original"],
+                    _translation_contract(raw.get("meta")),
+                )] = safe
             elif warns:
                 invalid += 1
     if not lookup:
@@ -208,7 +236,10 @@ def load_checkpoint_into(pipeline, items: list, checkpoint: Path):
         return
     loaded = 0
     for item in items:
-        t = lookup.get((item.file, item.key, item.original))
+        t = lookup.get((
+            item.file, item.key, item.original,
+            _translation_contract(getattr(item, "meta", {})),
+        ))
         if t:
             item.translated = t
             loaded += 1
@@ -241,6 +272,13 @@ def save_checkpoint_json(pipeline, items: list, game_path: Path,
         "target_lang": target_lang,
         "total": len(items),
         "translated_count": sum(1 for it in items if _pipeline_mod._has_effective_translation(it)),
+        "translation_contracts": sorted({
+            contract
+            for contract in (
+                _translation_contract(getattr(it, "meta", {})) for it in items
+            )
+            if contract
+        }),
         "items": [
             {
                 "file": it.file,
@@ -277,12 +315,18 @@ def sync_checkpoint_json(pipeline, checkpoint: Path, items: list) -> None:
 
     lookup: dict[tuple, list[dict]] = {}
     for raw in data.get("items", []):
-        key = (raw["file"], raw.get("key", ""), raw["original"])
+        key = (
+            raw["file"], raw.get("key", ""), raw["original"],
+            _translation_contract(raw.get("meta")),
+        )
         lookup.setdefault(key, []).append(raw)
 
     effective_by_key: dict[tuple, str] = {}
     for it in items:
-        key = (it.file, it.key, it.original)
+        key = (
+            it.file, it.key, it.original,
+            _translation_contract(getattr(it, "meta", {})),
+        )
         effective_by_key.setdefault(key, "")
         if not effective_by_key[key] and _pipeline_mod._has_effective_translation(it):
             effective_by_key[key] = it.translated

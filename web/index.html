@@ -647,12 +647,19 @@
           </div>
           <span id="hy-mt2-size" class="hy-mt2-size"></span>
         </div>
+        <div class="field hy-mt2-model-field">
+          <label>离线模型</label>
+          <select name="hy_mt2_model" onchange="onHyMt2ModelChanged(this.value)">
+            <option value="Hy-MT2-1.8B-Q4_K_M">Hy-MT2 1.8B（轻量，约 1.1 GB）</option>
+            <option value="HY-MT2-7B-Q8_0">Hy-MT2 7B（高质量，约 7.4 GB）</option>
+          </select>
+        </div>
         <div id="hy-mt2-status" class="settings-note">正在检查离线组件…</div>
         <div class="hy-mt2-actions">
-          <button type="button" class="btn secondary" id="hy-mt2-install-btn" onclick="installHyMt2()"><svg class="ic"><use href="#i-download"/></svg>下载/修复离线组件</button>
-          <button type="button" class="icon-btn" id="hy-mt2-remove-btn" onclick="removeHyMt2()" title="删除离线组件" aria-label="删除离线组件" hidden><svg class="ic"><use href="#i-trash"/></svg></button>
+          <button type="button" class="btn secondary" id="hy-mt2-install-btn" onclick="installHyMt2()"><svg class="ic"><use href="#i-download"/></svg>下载/修复当前模型</button>
+          <button type="button" class="icon-btn" id="hy-mt2-remove-btn" onclick="removeHyMt2()" title="删除当前模型" aria-label="删除当前模型" hidden><svg class="ic"><use href="#i-trash"/></svg></button>
         </div>
-        <div class="settings-note hy-mt2-note">模型和运行器从腾讯 ModelScope 与 llama.cpp 官方源下载，不计入安装包；翻译完全在本机运行，不消耗试用额度。</div>
+        <div class="settings-note hy-mt2-note">两个模型可同时保留，切换不会删除另一个模型。模型和运行器从腾讯 ModelScope 与 llama.cpp 官方源下载，不计入安装包；翻译完全在本机运行，不消耗试用额度。</div>
       </div>
     </div>
 

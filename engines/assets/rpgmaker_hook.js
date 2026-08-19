@@ -91,39 +91,72 @@
         return [cat, id, role].filter(Boolean).join('.');
     }
 
+    var RPGM_SEGMENT = '__RPGM_SEGMENT__';
+
     function scanList(list, context) {
         if (!list) return [];
         var texts = [];
         for (var j = 0; j < list.length; j++) {
             var cmd = list[j];
             if (!cmd || !cmd.parameters) continue;
-            if (cmd.code === 101) texts.push({text: cmd.parameters[4], ctx: context + '.line'});
-            if (cmd.code === 401) texts.push({text: cmd.parameters[0], ctx: context + '.line'});
-            if (cmd.code === 102 && cmd.parameters[0])
+            if (cmd.code === 101 || cmd.code === 401) {
+                if (cmd.code === 101 && cmd.parameters[4]) {
+                    texts.push({
+                        text: cmd.parameters[4],
+                        ctx: context + '.speaker',
+                        meta: {speakerName: true}
+                    });
+                }
+                var cursor = cmd.code === 101 ? j + 1 : j;
+                var segments = [];
+                while (cursor < list.length && list[cursor] && list[cursor].code === 401) {
+                    if (list[cursor].parameters && list[cursor].parameters[0])
+                        segments.push(String(list[cursor].parameters[0]));
+                    cursor++;
+                }
+                if (segments.length) {
+                    var speaker = '';
+                    var speakerMatch = segments[0].match(/^(?:\\n|\n)?<([^<>\r\n]{1,256})>/);
+                    if (speakerMatch) {
+                        speaker = speakerMatch[1];
+                        texts.push({
+                            text: speaker,
+                            ctx: context + '.name',
+                            meta: {speakerName: true}
+                        });
+                    }
+                    texts.push({
+                        text: segments.join(RPGM_SEGMENT),
+                        ctx: context + '.line',
+                        meta: {segments: segments, speaker: speaker}
+                    });
+                    j = cursor - 1;
+                }
+            } else if (cmd.code === 102 && cmd.parameters[0])
                 for (var c = 0; c < cmd.parameters[0].length; c++)
                     texts.push({text: cmd.parameters[0][c], ctx: context + '.choice'});
-            if (cmd.code === 402) texts.push({text: cmd.parameters[0], ctx: context + '.choice'});
-            if (cmd.code === 105) texts.push({text: cmd.parameters[0], ctx: context + '.scroll'});
-            if (cmd.code === 405) texts.push({text: cmd.parameters[0], ctx: context + '.scroll'});
+            else if (cmd.code === 402) texts.push({text: cmd.parameters[1], ctx: context + '.choice'});
+            else if (cmd.code === 105) texts.push({text: cmd.parameters[0], ctx: context + '.scroll'});
+            else if (cmd.code === 405) texts.push({text: cmd.parameters[0], ctx: context + '.scroll'});
         }
         return texts;
     }
 
     function doScan() {
         var items = [];
-        function add(text, context) {
+        function add(text, context, meta) {
             if (!text || typeof text !== 'string') return;
             var s = text.trim();
             if (s.length < 1 || s.length > 500) return;
             if (/^\\[A-Za-z]+\s*\[[^\]]*\]$/i.test(s)) return;
-            items.push({text: s, context: context || 'unknown', count: 1});
+            items.push({text: s, context: context || 'unknown', count: 1, meta: meta || {}});
         }
 
         if ($dataCommonEvents) {
             for (var i = 0; i < $dataCommonEvents.length; i++) {
                 var ev = $dataCommonEvents[i];
                 if (!ev || !ev.list) continue;
-                scanList(ev.list, makeCtx('CmEv', ev.id, ev.name, 'dialogue')).forEach(function(t) { add(t.text, t.ctx); });
+                scanList(ev.list, makeCtx('CmEv', ev.id, ev.name, 'dialogue')).forEach(function(t) { add(t.text, t.ctx, t.meta); });
             }
         }
         if ($dataMap && $dataMap.events) {
@@ -131,7 +164,7 @@
                 var mev = $dataMap.events[i];
                 if (!mev || !mev.pages) continue;
                 for (var p = 0; p < mev.pages.length; p++)
-                    scanList(mev.pages[p].list, makeCtx('Map', ($dataMap.mapId||0) + '.Ev' + (mev.id || i), mev.name, 'dialogue')).forEach(function(t) { add(t.text, t.ctx); });
+                    scanList(mev.pages[p].list, makeCtx('Map', ($dataMap.mapId||0) + '.Ev' + (mev.id || i), mev.name, 'dialogue')).forEach(function(t) { add(t.text, t.ctx, t.meta); });
             }
         }
         if ($dataMapInfos) {
@@ -181,7 +214,23 @@
             var safe = protectControls(item.text);
             if (!seen[safe]) {
                 seen[safe] = true;
-                unique.push({safe: safe, text: item.text, context: item.context, count: 1, types: _ctrlTypes.slice()});
+                var itemMeta = item.meta || {};
+                var groupTypes = _ctrlTypes.slice();
+                var safeSegments = [];
+                if (itemMeta.segments) {
+                    for (var si = 0; si < itemMeta.segments.length; si++)
+                        safeSegments.push(protectControls(String(itemMeta.segments[si])));
+                }
+                unique.push({
+                    safe: safe,
+                    text: item.text,
+                    context: item.context,
+                    count: 1,
+                    types: groupTypes,
+                    segments: safeSegments,
+                    speaker: itemMeta.speaker || '',
+                    speaker_name: !!itemMeta.speakerName
+                });
             } else {
                 for (var u = 0; u < unique.length; u++)
                     if (unique[u].safe === safe) { unique[u].count++; break; }
@@ -384,6 +433,16 @@
 
         // Choices and plugin-provided choice help can bypass Game_Message.add.
         if (typeof Game_Message !== 'undefined' && Game_Message.prototype) {
+            // MZ keeps the speaker name outside the message body. Several MV
+            // name-window plugins expose the same role through showNameWindow
+            // below, so cover both paths instead of relying on drawText.
+            if (Game_Message.prototype.setSpeakerName) {
+                var _origSetSpeakerName = Game_Message.prototype.setSpeakerName;
+                Game_Message.prototype.setSpeakerName = function(speakerName) {
+                    return _origSetSpeakerName.call(this, _replace(speakerName));
+                };
+                _diagWrite('hooked Game_Message.setSpeakerName');
+            }
             if (Game_Message.prototype.setChoices) {
                 var _origSetChoices = Game_Message.prototype.setChoices;
                 Game_Message.prototype.setChoices = function(choices, defaultType, cancelType) {
@@ -466,6 +525,13 @@
 
         // Hook 4: Window_Message / Window_ChoiceList etc. — more specific hooks
         if (typeof Window_Message !== 'undefined' && Window_Message.prototype) {
+            if (Window_Message.prototype.showNameWindow) {
+                var _origShowNameWindow = Window_Message.prototype.showNameWindow;
+                Window_Message.prototype.showNameWindow = function(name, position) {
+                    return _origShowNameWindow.call(this, _replace(name), position);
+                };
+                _diagWrite('hooked Window_Message.showNameWindow');
+            }
             if (Window_Message.prototype.newPage) {
                 var _origNewPage = Window_Message.prototype.newPage;
                 var self = this;

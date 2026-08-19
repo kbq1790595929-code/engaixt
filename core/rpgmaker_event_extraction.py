@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
+
+
+RPGMAKER_MESSAGE_CONTRACT = "rpgmaker_message_v2"
+RPGMAKER_MESSAGE_SEPARATOR = "__RPGM_SEGMENT__"
+
+_LEADING_SPEAKER_RE = re.compile(
+    r"^(?P<prefix>(?:\\n|\n)?)<(?P<name>[^<>\r\n]{1,256})>"
+)
 
 
 _CHOICE_HELP_MARKERS = {
@@ -136,6 +145,127 @@ def _scan_event_list(event_list: list, context: str) -> list[tuple[str, str, int
     return texts
 
 
+def _scan_event_records(event_list: list, context: str) -> list[dict]:
+    """Extract event text while keeping each message box as one unit.
+
+    RPG Maker stores one visible message as a ``101`` command followed by one
+    or more ``401`` screen lines. Translating those lines independently lets a
+    model merge a sentence and shift every following result by one id. The
+    grouped record keeps the authored screen-line boundaries in metadata so the
+    runtime map can split the translated message back into the original calls.
+    """
+    records: list[dict] = []
+    if not event_list:
+        return records
+
+    def add(text: object, role: str, index: int, meta: dict | None = None) -> None:
+        if text:
+            records.append({
+                "text": str(text),
+                "context": context + role,
+                "command_index": index,
+                "meta": dict(meta or {}),
+            })
+
+    index = 0
+    while index < len(event_list):
+        command = event_list[index]
+        if not command or "code" not in command:
+            index += 1
+            continue
+        code = command["code"]
+        params = command.get("parameters", [])
+
+        if code in {101, 401}:
+            start_index = index
+            if code == 101 and len(params) > 4 and params[4]:
+                add(
+                    params[4],
+                    ".speaker",
+                    index,
+                    {
+                        "rpgmaker_speaker_name": True,
+                        "translation_cache_scope": "rpgmaker_speaker_v1",
+                        "translation_contract": "rpgmaker_speaker_v1",
+                    },
+                )
+            cursor = index + 1 if code == 101 else index
+            segments: list[str] = []
+            while cursor < len(event_list):
+                follow = event_list[cursor]
+                if not follow or follow.get("code") != 401:
+                    break
+                follow_params = follow.get("parameters", [])
+                if follow_params and follow_params[0]:
+                    segments.append(str(follow_params[0]))
+                cursor += 1
+            if segments:
+                speaker = ""
+                speaker_match = _LEADING_SPEAKER_RE.match(segments[0])
+                if speaker_match:
+                    speaker = speaker_match.group("name")
+                    add(
+                        speaker,
+                        ".name",
+                        start_index,
+                        {
+                            "rpgmaker_speaker_name": True,
+                            "translation_cache_scope": "rpgmaker_speaker_v1",
+                            "translation_contract": "rpgmaker_speaker_v1",
+                        },
+                    )
+                add(
+                    RPGMAKER_MESSAGE_SEPARATOR.join(segments),
+                    ".line",
+                    start_index,
+                    {
+                        "rpgmaker_segments": segments,
+                        "rpgmaker_speaker": speaker,
+                        "translation_cache_scope": RPGMAKER_MESSAGE_CONTRACT,
+                        "translation_contract": RPGMAKER_MESSAGE_CONTRACT,
+                    },
+                )
+                index = cursor
+                continue
+        elif code == 102 and params and params[0]:
+            for choice in params[0]:
+                add(choice, ".choice", index)
+        elif code == 402 and len(params) > 1 and params[1]:
+            add(params[1], ".choice", index)
+        elif code == 105 and params and params[0]:
+            add(params[0], ".scroll", index)
+        elif code == 405 and params and params[0]:
+            add(params[0], ".scroll", index)
+        elif code == 108 and params and _is_choice_help_marker(params[0]):
+            for follow in event_list[index + 1:]:
+                if not follow or follow.get("code") != 408:
+                    break
+                follow_params = follow.get("parameters", [])
+                if follow_params and follow_params[0]:
+                    add(follow_params[0], ".choice_help", index)
+        elif code == 320 and len(params) > 1 and params[1]:
+            add(params[1], ".name", index)
+        elif code in {324, 325} and len(params) > 1 and params[1]:
+            add(params[1], ".profile", index)
+        elif code == 357 and len(params) > 3:
+            for visible_text in _plugin_visible_texts(params[3]):
+                add(visible_text, ".plugin_text", index)
+
+        index += 1
+
+    return records
+
+
+def _records_with_adjacency(records: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    for index, record in enumerate(records):
+        item = dict(record)
+        item["prev_text"] = records[index - 1]["text"] if index > 0 else ""
+        item["next_text"] = records[index + 1]["text"] if index < len(records) - 1 else ""
+        result.append(item)
+    return result
+
+
 def _texts_with_adjacency(texts: list[tuple[str, str, int]]) -> list[dict]:
     result = []
     for index, (text, context, _) in enumerate(texts):
@@ -150,4 +280,12 @@ def _texts_with_adjacency(texts: list[tuple[str, str, int]]) -> list[dict]:
     return result
 
 
-__all__ = ["_make_ctx", "_scan_event_list", "_texts_with_adjacency"]
+__all__ = [
+    "RPGMAKER_MESSAGE_CONTRACT",
+    "RPGMAKER_MESSAGE_SEPARATOR",
+    "_make_ctx",
+    "_records_with_adjacency",
+    "_scan_event_list",
+    "_scan_event_records",
+    "_texts_with_adjacency",
+]

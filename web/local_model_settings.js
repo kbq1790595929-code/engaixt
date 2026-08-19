@@ -10,6 +10,17 @@ function onTranslatorChanged(value) {
     if (localSelected) refreshHyMt2Status();
 }
 
+async function onHyMt2ModelChanged(value) {
+    syncSettingValue("hy_mt2_model", value);
+    if (!window.pywebview || !pywebview.api) return;
+    try {
+        await pywebview.api.save_config({ hy_mt2_model: value });
+        await refreshHyMt2Status();
+    } catch (e) {
+        onHyMt2InstallFailed(e && e.message ? e.message : String(e));
+    }
+}
+
 function _formatComponentBytes(value) {
     const bytes = Number(value || 0);
     if (!bytes) return "";
@@ -33,29 +44,28 @@ function onHyMt2Status(status) {
     const install = document.getElementById("hy-mt2-install-btn");
     const remove = document.getElementById("hy-mt2-remove-btn");
     if (!statusEl || !badge) return;
-    const hardware = status && status.hardware || {};
-    const runner = status && (status.runner || status.expected_runner) || "";
-    let message = t("未安装（首次下载约 1.2-1.8 GB）");
-    if (status && status.ready) {
-        message = `${t("已就绪")}：${hardware.name || t("未知设备")} / ${runner}`;
-    } else if (status && status.model_ready && status.runtime_ready && !status.hardware_matches) {
-        message = `${t("检测到设备变化，需要重新安装运行器")}：${status.expected_runner || ""}`;
-    } else if (status && status.model_ready) {
-        message = t("模型已下载，运行器缺失");
+    let message = status && status.message || t("未安装");
+    if (status && status.deployment_verification) {
+        const verified = status.deployment_verification;
+        message += ` · ${t("后端验证通过")}：${verified.backend || ""}`;
     }
     if (status && status.running && status.active_backend) {
         message += ` · ${t("正在运行")}：${status.active_backend}`;
     }
     statusEl.textContent = message;
-    badge.textContent = status && status.ready ? t("已安装") : t("未安装");
+    badge.textContent = status && status.ready
+        ? t("已安装")
+        : status && status.local_model_found
+            ? t("已发现本地模型")
+            : t("未安装");
     badge.classList.toggle("ready", !!(status && status.ready));
     if (size) size.textContent = _formatComponentBytes(status && status.installed_bytes);
     if (install) {
         install.disabled = false;
-        install.innerHTML = `<svg class="ic"><use href="#i-download"/></svg>${status && status.ready ? t("检查/修复组件") : t("下载/修复离线组件")}`;
+        install.innerHTML = `<svg class="ic"><use href="#i-download"/></svg>${status && status.ready ? t("检查/修复当前模型") : t("下载/修复当前模型")}`;
     }
     if (remove) {
-        remove.hidden = !(status && (status.model_ready || status.runtime_ready));
+        remove.hidden = !(status && status.model_ready);
         remove.disabled = false;
     }
 }
@@ -78,6 +88,13 @@ function onHyMt2InstallFailed(message) {
 }
 
 async function installHyMt2() {
+    const modelSelect = document.querySelector('#hy-mt2-component [name="hy_mt2_model"]');
+    if (modelSelect && modelSelect.value === "HY-MT2-7B-Q8_0") {
+        const confirmed = confirm(
+            "Hy-MT2 7B 高质量模型提示\n\n如果你的显存不足十个G左右，请不要下载此模型，必失败！"
+        );
+        if (!confirmed) return;
+    }
     const install = document.getElementById("hy-mt2-install-btn");
     const remove = document.getElementById("hy-mt2-remove-btn");
     if (install) install.disabled = true;
@@ -90,7 +107,7 @@ async function installHyMt2() {
 }
 
 async function removeHyMt2() {
-    if (!confirm(t("确定删除 Hy-MT2 离线模型和运行器吗？"))) return;
+    if (!confirm(t("确定删除当前 Hy-MT2 离线模型吗？其他已下载模型会保留。"))) return;
     const install = document.getElementById("hy-mt2-install-btn");
     const remove = document.getElementById("hy-mt2-remove-btn");
     if (install) install.disabled = true;
