@@ -529,7 +529,7 @@ def prune_missing_games(remove_workspaces: bool = False) -> dict[str, int]:
         data = _read_json(manifest_file)
         game_dir_text = str(data.get("game_dir") or "").strip()
         game_path = Path(game_dir_text) if game_dir_text else None
-        if game_path and game_path.exists():
+        if game_path and game_path.is_dir():
             continue
 
         game_id = str(data.get("game_id") or manifest_file.stem)

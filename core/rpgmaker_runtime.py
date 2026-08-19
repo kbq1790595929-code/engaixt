@@ -22,11 +22,21 @@ import time
 from pathlib import Path
 
 from core.resources import resource_path
-from core.rpgmaker_event_extraction import _make_ctx, _scan_event_list, _texts_with_adjacency
+from core.rpgmaker_event_extraction import (
+    RPGMAKER_MESSAGE_CONTRACT,
+    _make_ctx,
+    _records_with_adjacency,
+    _scan_event_list,
+    _scan_event_records,
+)
 from core.rpgmaker_legacy_translation import translate_scanned_items
+from core.rpgmaker_runtime_map import (
+    build_runtime_translation_map as _build_runtime_translation_map,
+    sanitize_translation_map as _sanitize_runtime_translation_map,
+)
 from engines.base import TextItem
 from utils.logger import info, warning, debug
-from utils.text_extract import contains_kana, is_punctuation_only, verify_translation
+from utils.text_extract import contains_kana, is_punctuation_only
 
 
 # ---- Constants ----
@@ -372,7 +382,7 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
     debug(f"[静态扫描] 数据目录: {data_dir}")
     raw_items = []  # [{text, context}]
 
-    def _add(text, context, prev_text="", next_text=""):
+    def _add(text, context, prev_text="", next_text="", meta=None):
         if not text or not isinstance(text, str):
             return
         s = text.strip()
@@ -384,6 +394,7 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
             'text': s, 'context': context,
             'prev_text': prev_text.strip() if prev_text else "",
             'next_text': next_text.strip() if next_text else "",
+            'meta': dict(meta or {}),
         })
 
     # 1. CommonEvents
@@ -394,9 +405,12 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
             if not ev or not ev.get('list'):
                 continue
             ctx = _make_ctx('CmEv', ev.get('id'), ev.get('name', ''), 'dialogue')
-            extracted = _scan_event_list(ev['list'], ctx)
-            for item in _texts_with_adjacency(extracted):
-                _add(item['text'], item['context'], item['prev_text'], item['next_text'])
+            extracted = _scan_event_records(ev['list'], ctx)
+            for item in _records_with_adjacency(extracted):
+                _add(
+                    item['text'], item['context'], item['prev_text'], item['next_text'],
+                    item.get('meta'),
+                )
         debug(f"[静态扫描] CommonEvents: {len(data)} 事件")
 
     # 2. MapInfos（地图名称）
@@ -427,9 +441,12 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
                 if not page or not page.get('list'):
                     continue
                 ctx = _make_ctx('Map', f'{map_id}.Ev{ev.get("id", "")}.P{p_idx}', ev.get('name', ''), 'dialogue')
-                extracted = _scan_event_list(page['list'], ctx)
-                for item in _texts_with_adjacency(extracted):
-                    _add(item['text'], item['context'], item['prev_text'], item['next_text'])
+                extracted = _scan_event_records(page['list'], ctx)
+                for item in _records_with_adjacency(extracted):
+                    _add(
+                        item['text'], item['context'], item['prev_text'], item['next_text'],
+                        item.get('meta'),
+                    )
         map_count += 1
     debug(f"[静态扫描] {map_count} 个地图")
 
@@ -493,6 +510,12 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
     seen: dict[str, dict] = {}
     for item in raw_items:
         safe, ctrl_types = _protect_controls(item['text'])
+        item_meta = dict(item.get('meta') or {})
+        if item_meta.get('rpgmaker_segments'):
+            item_meta['rpgmaker_segments'] = [
+                _protect_controls(str(segment))[0]
+                for segment in item_meta['rpgmaker_segments']
+            ]
         # 构建分组键：事件级上下文（去掉 .line/.choice/.scroll 后缀）
         ctx = item.get('context', '')
         group_key = re.sub(r'\.(line|choice|scroll)$', '', ctx) if '.' in ctx else ctx
@@ -509,6 +532,7 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
                 'prev_text': item.get('prev_text', ''),
                 'next_text': item.get('next_text', ''),
                 'group_key': group_key,
+                'meta': item_meta,
             }
 
     # 过滤纯标点/数字（不翻译）
@@ -528,6 +552,7 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
                 "prev_text": it.get("prev_text", ""),
                 "next_text": it.get("next_text", ""),
                 "group_key": it.get("group_key", ""),
+                **dict(it.get("meta") or {}),
             },
         )
         for it in filtered.values()
@@ -623,7 +648,21 @@ def _scan_via_hook(
             key=it["safe"],
             original=it["safe"],
             context=it.get("context", ""),
-            meta={"text": it.get("text", ""), "count": it.get("count", 0)},
+            meta={
+                "text": it.get("text", ""),
+                "count": it.get("count", 0),
+                **({
+                    "rpgmaker_segments": list(it.get("segments") or []),
+                    "rpgmaker_speaker": str(it.get("speaker") or ""),
+                    "translation_cache_scope": RPGMAKER_MESSAGE_CONTRACT,
+                    "translation_contract": RPGMAKER_MESSAGE_CONTRACT,
+                } if it.get("segments") else {}),
+                **({
+                    "rpgmaker_speaker_name": True,
+                    "translation_cache_scope": "rpgmaker_speaker_v1",
+                    "translation_contract": "rpgmaker_speaker_v1",
+                } if it.get("speaker_name") else {}),
+            },
         )
         for it in seen.values()
     ]
@@ -670,25 +709,7 @@ def _deploy_replace(
 
 
 def _sanitize_translation_map(trans_map: dict[str, str]) -> dict[str, str]:
-    """Final guard before a runtime map reaches the game process."""
-    cleaned: dict[str, str] = {}
-    dropped = 0
-    for source, translated in (trans_map or {}).items():
-        source_s = str(source or "")
-        translated_s = str(translated or "")
-        if _should_skip(source_s):
-            dropped += 1
-            continue
-        safe, warns = verify_translation(source_s, translated_s)
-        if warns:
-            debug(f"[RPGMaker 清洗] {source_s[:30]}: {'; '.join(warns)}")
-        if safe and safe.strip() and safe != source_s:
-            cleaned[source_s] = safe
-        else:
-            dropped += 1
-    if dropped:
-        info(f"RPGMaker 运行时译文表已清洗，丢弃 {dropped} 条无效/污染条目")
-    return cleaned
+    return _sanitize_runtime_translation_map(trans_map, should_skip=_should_skip)
 
 
 def _contains_japanese_kana(text: str) -> bool:
@@ -707,10 +728,15 @@ def _build_display_coverage_report(
     """Compare extracted display sources with the map actually loaded by the hook."""
     source_contexts: dict[str, str] = {}
     for item in items:
-        source = str(getattr(item, "original", "") or "").strip()
-        if not source or _should_skip(source):
-            continue
-        source_contexts.setdefault(source, str(getattr(item, "context", "") or ""))
+        context = str(getattr(item, "context", "") or "")
+        meta = getattr(item, "meta", {}) or {}
+        segments = meta.get("rpgmaker_segments")
+        sources = segments if isinstance(segments, list) and segments else [getattr(item, "original", "")]
+        for value in sources:
+            source = str(value or "").strip()
+            if not source or _should_skip(source):
+                continue
+            source_contexts.setdefault(source, context)
 
     mapped = [source for source in source_contexts if source in deployed_map]
     unmapped = [source for source in source_contexts if source not in deployed_map]
@@ -808,20 +834,33 @@ def translate_and_deploy(game_path: Path, items: list[TextItem],
     falls back to checkpoint JSON in workspace if items have no translations."""
     game_dir = _game_dir(game_path)
 
-    # Build translation map from items
-    trans_map: dict[str, str] = {}
-    for it in items:
-        if it.translated and it.translated != it.original:
-            trans_map[it.original] = it.translated
+    # Build the per-display-line map from grouped translation items.
+    trans_map, map_stats = _build_runtime_translation_map(items)
+    if map_stats["grouped_messages"]:
+        info(
+            "RPGMaker 消息映射: "
+            f"{map_stats['grouped_messages']} 个对话框 -> "
+            f"{map_stats['expanded_lines']} 条显示行"
+        )
 
     # Fallback: checkpoint JSON in workspace
     if not trans_map and workspace:
         ck = Path(workspace) / "translation_checkpoint.json"
         if ck.exists():
             data = json.loads(ck.read_text(encoding="utf-8"))
-            for it in data.get("items", []):
-                if it.get("translated") and it["translated"] != it["original"]:
-                    trans_map[it["original"]] = it["translated"]
+            checkpoint_items = [
+                TextItem(
+                    file=str(raw.get("file", "")),
+                    key=str(raw.get("key", "")),
+                    original=str(raw.get("original", "")),
+                    translated=str(raw.get("translated", "") or ""),
+                    context=str(raw.get("context", "")),
+                    line=int(raw.get("line", 0) or 0),
+                    meta=raw.get("meta", {}) if isinstance(raw.get("meta"), dict) else {},
+                )
+                for raw in data.get("items", [])
+            ]
+            trans_map, map_stats = _build_runtime_translation_map(checkpoint_items)
             if trans_map:
                 info(f"从检查点加载了 {len(trans_map)} 条翻译")
 

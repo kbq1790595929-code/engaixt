@@ -10,6 +10,7 @@ from translators.cache import get_cache
 from translators.deepseek import DeepSeekTranslator, _Batch
 from translators.deepseek_batch_json import BatchJsonParseError, BatchShapeError
 from translators.hy_mt2_component import MODEL_NAME
+from translators.hy_mt2_models import resolve_model_name
 from translators.hy_mt2_quality import (
     finalize_local_translations,
     repair_translation_structure,
@@ -36,6 +37,10 @@ class HyMt2Translator(DeepSeekTranslator):
         self._speed_last_logged_at = 0.0
         self._speed_generated_tokens = 0
         self._speed_inference_seconds = 0.0
+
+    def _model(self, config=None) -> str:
+        config = config or get_config()
+        return resolve_model_name(getattr(config, self.MODEL_CONFIG_FIELD, ""))
 
     async def translate_realtime_text(
         self,
@@ -279,6 +284,46 @@ class HyMt2Translator(DeepSeekTranslator):
         info(f"Hy-MT2 翻译完成: {len(batches)} 批，耗时 {time.perf_counter() - started:.1f}s")
         return items
 
+    def _make_batches(
+        self,
+        pending,
+        cache,
+        source_lang: str = "ja",
+        target_lang: str = "zh-CN",
+        *,
+        concurrency: int | None = None,
+    ) -> list:
+        """本地模型按条数上限切批，避免大批次超出上下文被截断。
+
+        DeepSeek 的 token 预算分批适合云端 API，但 Hy-MT2 本地运行时上下文
+        有限（hy_mt2_context_size，默认 4096）。几百条一批时提示词+输出
+        会超出上下文，llama.cpp 截断提示词后模型输出无法解析（JSON 解析
+        失败→反复拆批重试全部失败）。这里在 token 预算基础上再按
+        MAX_MESSAGE_BATCH（配置 hy_mt2_batch_size）切成小批。
+        """
+        batches = super()._make_batches(
+            pending,
+            cache,
+            source_lang,
+            target_lang,
+            concurrency=concurrency,
+        )
+        limit = self.MAX_MESSAGE_BATCH
+        if limit <= 0:
+            return batches
+        capped: list = []
+        for batch in batches:
+            items = batch.items
+            for start in range(0, len(items), limit):
+                capped.append(
+                    _Batch(
+                        list(items[start:start + limit]),
+                        batch.text_type,
+                        batch.complex,
+                    )
+                )
+        return capped
+
     def _finalize(self, items: list[TextItem], source_lang: str, target_lang: str) -> None:
         before = {id(item): item.translated for item in items}
         structure_fixed, speaker_fixed, inconsistent_groups = finalize_local_translations(items)
@@ -455,7 +500,11 @@ class HyMt2Translator(DeepSeekTranslator):
             "只输出翻译后的单个JSON对象，不要解释、Markdown、代码围栏或原文。",
         ]
         if strict:
-            rules.insert(0, "上次输出格式不正确。严格只返回可被json.loads解析的JSON对象。")
+            rules.insert(
+                0,
+                "上次输出格式不正确，请重新翻译。保持键与输入JSON完全一致（如 1:message），"
+                "每条之间用逗号分隔，只输出合法的JSON对象。",
+            )
         prompt = "\n".join(rules) + "\n输入JSON:\n" + json.dumps(
             records, ensure_ascii=False, separators=(",", ":")
         )

@@ -20,6 +20,16 @@ DB_DIR = Path.home() / ".game_translator" / "cache"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _cache_source_for_item(item) -> str:
+    """Namespace engine contracts without exposing the marker to translators."""
+    original = str(getattr(item, "original", "") or "")
+    meta = getattr(item, "meta", {}) or {}
+    scope = str(meta.get("translation_cache_scope") or "").strip()
+    if not scope:
+        return original
+    return f"\x1e{scope}\x1e{original}"
+
+
 def _get_db_path(game_dir: Path) -> Path:
     """根据游戏目录路径生成独立的数据库文件。"""
     game_hash = hashlib.md5(str(game_dir.resolve()).encode()).hexdigest()[:12]
@@ -278,7 +288,7 @@ def load_translations_from_cache(game_dir: Path, items: list) -> int:
                     or is_acceptable_same_as_source(item.original, item.translated)
                 ):
                     continue  # 已有翻译
-                cached = db.get_translation(item.original)
+                cached = db.get_translation(_cache_source_for_item(item))
                 if cached:
                     source_for_validation = validation_source_for_item(item)
                     safe, warns = verify_translation(source_for_validation, cached)
@@ -313,7 +323,7 @@ def save_translations_to_cache(game_dir: Path, items: list):
                     if safe and (
                         safe != item.original or is_acceptable_same_as_source(item.original, safe)
                     ):
-                        batch.append((item.original, safe, item.file))
+                        batch.append((_cache_source_for_item(item), safe, item.file))
                     elif warns:
                         debug(f"  跳过未通过质量校验的 SQLite 缓存写入: {item.original[:40]}")
             if batch:

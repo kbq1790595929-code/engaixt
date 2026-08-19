@@ -13,23 +13,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from translators.hy_mt2_models import (
+    DEFAULT_MODEL_NAME,
+    HyMt2ModelSpec,
+    model_choices,
+    model_spec,
+    resolve_model_name,
+)
+from utils.logger import info
 
-MODEL_NAME = "Hy-MT2-1.8B-Q4_K_M"
-MODEL_FILENAME = f"{MODEL_NAME}.gguf"
-MODEL_SIZE = 1_133_080_448
-MODEL_SHA256 = "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699"
-MODEL_URL = (
-    "https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B-GGUF/"
-    f"resolve/master/{MODEL_FILENAME}"
-)
-MODEL_LICENSE_URL = (
-    "https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B-GGUF/"
-    "resolve/master/LICENSE.txt"
-)
+# Backward-compatible aliases for callers and older plugin code. New code must
+# resolve the selected model through model_spec() instead of using these values.
+MODEL_NAME = DEFAULT_MODEL_NAME
+MODEL_FILENAME = model_spec().filename
+MODEL_SIZE = model_spec().size
+MODEL_SHA256 = model_spec().sha256
+MODEL_URL = model_spec().source_url
+MODEL_LICENSE_URL = model_spec().license_url
 LLAMA_RELEASE = "b10085"
 LLAMA_LICENSE_URL = f"https://raw.githubusercontent.com/ggml-org/llama.cpp/{LLAMA_RELEASE}/LICENSE"
 
 ProgressCallback = Callable[[dict], None]
+_LOCAL_MODEL_DISCOVERY_TTL_SECONDS = 300.0
+_local_model_discovery_cache: dict[str, tuple[float, Path | None]] = {}
 
 
 @dataclass(frozen=True)
@@ -85,8 +91,23 @@ def component_dir() -> Path:
     return Path.home() / "Downloads" / ".game_translator" / "models" / "hy_mt2"
 
 
-def model_path() -> Path:
-    return component_dir() / "model" / MODEL_FILENAME
+def selected_model_name() -> str:
+    try:
+        from config import get_config
+
+        return resolve_model_name(getattr(get_config(), "hy_mt2_model", ""))
+    except Exception:
+        return DEFAULT_MODEL_NAME
+
+
+def model_path(model_name: str | None = None) -> Path:
+    selected = selected_model_name() if model_name is None else model_name
+    spec = model_spec(selected)
+    return _registered_model_path(spec, _load_manifest())
+
+
+def _managed_model_path(spec: HyMt2ModelSpec) -> Path:
+    return component_dir() / "model" / spec.filename
 
 
 def runtime_dir() -> Path:
@@ -99,6 +120,37 @@ def runtime_executable() -> Path:
 
 def manifest_path() -> Path:
     return component_dir() / "component.json"
+
+
+def _runtime_has_backend(runner: str) -> bool:
+    """Check the already unpacked runtime before scheduling a download."""
+    if not runtime_executable().is_file():
+        return False
+    runtime = runtime_dir()
+    if runner == "vulkan":
+        return (runtime / "ggml-vulkan.dll").is_file()
+    if runner.startswith("cuda"):
+        return (runtime / "ggml-cuda.dll").is_file() and any(
+            (runtime / name).is_file()
+            for name in ("cudart64_12.dll", "cudart64_13.dll")
+        )
+    return runner == "cpu"
+
+
+def _detect_installed_runner(manifest: dict) -> str:
+    """Recover the runner from disk for installs made before runner metadata."""
+    declared = str(manifest.get("runner") or "")
+    if declared in RUNTIME_ASSETS and _runtime_has_backend(declared):
+        return declared
+    runtime = runtime_dir()
+    if (runtime / "ggml-cuda.dll").is_file():
+        if (runtime / "cudart64_13.dll").is_file():
+            return "cuda-13.3"
+        if (runtime / "cudart64_12.dll").is_file():
+            return "cuda-12.4"
+    if (runtime / "ggml-vulkan.dll").is_file():
+        return "vulkan"
+    return ""
 
 
 def detect_graphics_adapters() -> list[dict[str, str]]:
@@ -163,29 +215,41 @@ def detected_hardware() -> dict[str, str]:
     return classify_graphics_adapters(detect_graphics_adapters())
 
 
-def component_status() -> dict:
+def component_status(model_name: str | None = None) -> dict:
+    """Return selected-model status without hashing multi-gigabyte files.
+
+    Files are hashed during download/repair. The persisted verified manifest
+    keeps routine settings refreshes instant even when the 7B model is present.
+    """
+    selected = model_spec(selected_model_name() if model_name is None else model_name)
     hardware = detected_hardware()
     manifest = _load_manifest()
-    model = model_path()
     executable = runtime_executable()
-    installed_runner = str(manifest.get("runner") or "")
-    model_ready = (
-        model.is_file()
-        and model.stat().st_size == MODEL_SIZE
-        and str(manifest.get("model_sha256") or "").lower() == MODEL_SHA256
-    )
-    runtime_ready = executable.is_file() and executable.stat().st_size > 0
-    hardware_matches = installed_runner == hardware["runner"]
+    installed_runner = _detect_installed_runner(manifest)
+    model_rows = [_model_status(spec, manifest) for spec in model_choices()]
+    selected_row = next(row for row in model_rows if row["name"] == selected.name)
+    model_ready = bool(selected_row["ready"])
+    runtime_ready = _runtime_has_backend(installed_runner)
+    hardware_matches = bool(installed_runner) and installed_runner == hardware["runner"]
     ready = model_ready and runtime_ready and hardware_matches
     installed_bytes = _directory_size(component_dir()) if component_dir().exists() else 0
+    installed_models = [row["label"] for row in model_rows if row["ready"]]
+    local_model_found = bool(selected_row.get("candidate_path"))
     if ready:
-        message = f"已就绪：{hardware['name']} / {installed_runner}"
+        message = f"{selected.label} 已就绪：{hardware['name']} / {installed_runner}"
+    elif local_model_found:
+        message = (
+            f"已发现本地模型：{selected_row['candidate_path']}；"
+            "点击“下载/修复当前模型”会校验并接入，不重复下载模型"
+        )
     elif model_ready and runtime_ready and not hardware_matches:
-        message = f"检测到设备变化，需要安装 {hardware['runner']} 运行器"
+        message = f"模型已下载，需要安装 {hardware['runner']} 运行器"
     elif model_ready:
         message = "模型已下载，运行器缺失"
     else:
-        message = "未安装（首次下载约 1.2-1.8 GB）"
+        message = f"未安装（下载约 {_format_gib(selected.size)}）"
+    if installed_models:
+        message += "；已安装：" + "、".join(installed_models)
     return {
         "ready": ready,
         "model_ready": model_ready,
@@ -194,8 +258,12 @@ def component_status() -> dict:
         "hardware": hardware,
         "runner": installed_runner,
         "expected_runner": hardware["runner"],
-        "model": MODEL_NAME,
-        "model_size": MODEL_SIZE,
+        "model": selected.name,
+        "model_label": selected.label,
+        "model_size": selected.size,
+        "models": model_rows,
+        "local_model_found": local_model_found,
+        "local_model_path": str(selected_row.get("candidate_path") or ""),
         "installed_bytes": installed_bytes,
         "component_dir": str(component_dir()),
         "message": message,
@@ -203,121 +271,216 @@ def component_status() -> dict:
     }
 
 
-def install_component(progress_callback: ProgressCallback | None = None) -> dict:
+def install_component(
+    progress_callback: ProgressCallback | None = None,
+    model_name: str | None = None,
+) -> dict:
+    selected = model_spec(selected_model_name() if model_name is None else model_name)
     root = component_dir()
-    current = component_status()
+    current = component_status(selected.name)
+    info(
+        f"[Hy-MT2 部署] 已选择模型: {selected.name}; 文件={selected.filename}; "
+        f"大小={_format_gib(selected.size)}"
+    )
     if (
         current.get("ready")
         and current.get("version") == LLAMA_RELEASE
-        and _valid_file(model_path(), MODEL_SIZE, MODEL_SHA256)
     ):
-        _emit(progress_callback, "done", "Hy-MT2 离线组件已是最新状态", 1, 1)
+        info("[Hy-MT2 部署] 模型与本地运行器已就绪，跳过重复下载")
+        _emit(progress_callback, "done", f"{selected.label} 已是最新状态", 1, 1)
         return current
     downloads = root / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
     hardware = detected_hardware()
     runner = hardware["runner"]
     assets = RUNTIME_ASSETS[runner]
-    total_bytes = MODEL_SIZE + sum(asset.size for asset in assets)
+    info(
+        f"[Hy-MT2 部署] 自动检测硬件: {hardware['name']}; "
+        f"选择运行器={runner}; 运行器包={len(assets)}"
+    )
+    model_ready = bool(current.get("model_ready"))
+    candidate_value = str(current.get("local_model_path") or "")
+    local_candidate = Path(candidate_value) if candidate_value else None
+    runtime_ready = bool(
+        current.get("runtime_ready")
+        and current.get("hardware_matches")
+        and current.get("runner") == runner
+    )
+    if runtime_ready:
+        info(f"[Hy-MT2 部署] 复用现有 {runner} 运行器，不重复下载")
+    total_bytes = (0 if model_ready or local_candidate else selected.size) + (
+        0 if runtime_ready else sum(asset.size for asset in assets)
+    )
+    total_bytes = max(1, total_bytes)
     completed_bytes = 0
 
-    _emit(progress_callback, "prepare", "准备 Hy-MT2 离线组件", 0, total_bytes)
-    model_download = downloads / MODEL_FILENAME
-    existing_model = model_path()
-    if _valid_file(existing_model, MODEL_SIZE, MODEL_SHA256):
-        completed_bytes += MODEL_SIZE
-        _emit(progress_callback, "model_ready", "Hy-MT2 模型已存在，跳过下载", completed_bytes, total_bytes)
-    else:
+    _emit(progress_callback, "prepare", f"准备 {selected.label}", 0, total_bytes)
+    model_download = downloads / selected.filename
+    managed_model = _managed_model_path(selected)
+    verified_model = model_path(selected.name) if model_ready else None
+    downloaded_model = False
+    if model_ready:
+        info(f"[Hy-MT2 部署] 已验证的模型文件存在，跳过下载: {verified_model}")
+        _emit(progress_callback, "model_ready", f"{selected.label} 已存在，跳过下载", 0, total_bytes)
+    elif local_candidate:
+        _emit(progress_callback, "verify_local_model", f"正在校验本地模型: {local_candidate.name}", 0, total_bytes)
+        if _valid_file(local_candidate, selected.size, selected.sha256):
+            model_ready = True
+            verified_model = local_candidate.resolve()
+            info(f"[Hy-MT2 部署] 已接入校验通过的本地模型: {verified_model}")
+            _emit(progress_callback, "model_ready", f"本地模型校验通过，已接入: {selected.label}", 0, total_bytes)
+        else:
+            info(f"[Hy-MT2 部署] 本地模型校验失败，改为下载: {local_candidate}")
+            total_bytes += selected.size
+    if not model_ready:
+        info(f"[Hy-MT2 部署] 开始下载模型: {selected.source_url}")
         _download(
-            MODEL_URL,
+            selected.source_url,
             model_download,
-            MODEL_SIZE,
-            MODEL_SHA256,
+            selected.size,
+            selected.sha256,
             progress_callback,
-            "下载 Hy-MT2 模型",
+            f"下载 {selected.label}",
             completed_bytes,
             total_bytes,
         )
-        completed_bytes += MODEL_SIZE
+        completed_bytes += selected.size
+        downloaded_model = True
 
     runtime_archives: list[tuple[RuntimeAsset, Path]] = []
-    for asset in assets:
-        archive = downloads / asset.filename
-        _download(
-            asset.url,
-            archive,
-            asset.size,
-            asset.sha256,
-            progress_callback,
-            f"下载 {runner} 运行器",
-            completed_bytes,
-            total_bytes,
-        )
-        completed_bytes += asset.size
-        runtime_archives.append((asset, archive))
+    if not runtime_ready:
+        for asset in assets:
+            archive = downloads / asset.filename
+            info(f"[Hy-MT2 部署] 下载运行器资源: {asset.filename}")
+            _download(
+                asset.url,
+                archive,
+                asset.size,
+                asset.sha256,
+                progress_callback,
+                f"下载 {runner} 运行器",
+                completed_bytes,
+                total_bytes,
+            )
+            completed_bytes += asset.size
+            runtime_archives.append((asset, archive))
 
     staging = root / f"runtime.staging.{os.getpid()}"
     backup = root / "runtime.backup"
-    shutil.rmtree(staging, ignore_errors=True)
-    staging.mkdir(parents=True, exist_ok=True)
     try:
-        for _asset, archive in runtime_archives:
-            _safe_extract_zip(archive, staging)
-        if not (staging / "llama-server.exe").is_file():
-            raise RuntimeError("llama.cpp 运行包缺少 llama-server.exe")
-        if runner == "vulkan" and not (staging / "ggml-vulkan.dll").is_file():
-            raise RuntimeError("Vulkan 运行包缺少 ggml-vulkan.dll")
-        if runner.startswith("cuda") and not (staging / "ggml-cuda.dll").is_file():
-            raise RuntimeError("CUDA 运行包缺少 ggml-cuda.dll")
-
-        model_path().parent.mkdir(parents=True, exist_ok=True)
-        if not _valid_file(existing_model, MODEL_SIZE, MODEL_SHA256):
-            model_download.replace(existing_model)
-
-        shutil.rmtree(backup, ignore_errors=True)
-        if runtime_dir().exists():
-            runtime_dir().replace(backup)
-        staging.replace(runtime_dir())
-        shutil.rmtree(backup, ignore_errors=True)
+        if downloaded_model:
+            managed_model.parent.mkdir(parents=True, exist_ok=True)
+            model_download.replace(managed_model)
+            verified_model = managed_model
+            info(f"[Hy-MT2 部署] 模型校验完成并已安装: {managed_model}")
+            _emit(
+                progress_callback,
+                "model_installed",
+                f"模型校验并安装完成: {selected.filename}",
+                completed_bytes,
+                total_bytes,
+            )
+        if runtime_archives:
+            info(f"[Hy-MT2 部署] 正在解压并切换 {runner} 运行器")
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            for _asset, archive in runtime_archives:
+                _safe_extract_zip(archive, staging)
+            if not (staging / "llama-server.exe").is_file():
+                raise RuntimeError("llama.cpp 运行包缺少 llama-server.exe")
+            if runner == "vulkan" and not (staging / "ggml-vulkan.dll").is_file():
+                raise RuntimeError("Vulkan 运行包缺少 ggml-vulkan.dll")
+            if runner.startswith("cuda") and not (staging / "ggml-cuda.dll").is_file():
+                raise RuntimeError("CUDA 运行包缺少 ggml-cuda.dll")
+            shutil.rmtree(backup, ignore_errors=True)
+            if runtime_dir().exists():
+                runtime_dir().replace(backup)
+            staging.replace(runtime_dir())
+            shutil.rmtree(backup, ignore_errors=True)
+            info(f"[Hy-MT2 部署] 运行器已就绪: {runtime_executable()}")
+            _emit(
+                progress_callback,
+                "runtime_ready",
+                f"{runner} 运行器已配置完成",
+                completed_bytes,
+                total_bytes,
+            )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         if backup.exists() and not runtime_dir().exists():
             backup.replace(runtime_dir())
         raise
 
-    _download_license(MODEL_LICENSE_URL, root / "licenses" / "Hy-MT2-LICENSE.txt")
+    _download_license(selected.license_url, root / "licenses" / f"{selected.name}-LICENSE.txt")
     _download_license(LLAMA_LICENSE_URL, root / "licenses" / "llama.cpp-LICENSE.txt")
-    manifest = {
-        "model": MODEL_NAME,
-        "model_sha256": MODEL_SHA256,
-        "model_size": MODEL_SIZE,
+    manifest = _load_manifest()
+    models = _manifest_models(manifest)
+    model_entry = {
+        "sha256": selected.sha256,
+        "size": selected.size,
+        "installed_at": int(time.time()),
+    }
+    if verified_model and verified_model.resolve() != managed_model.resolve():
+        model_entry["path"] = str(verified_model)
+    models[selected.name] = model_entry
+    manifest.update({
+        "models": models,
         "runner": runner,
         "runtime_version": LLAMA_RELEASE,
         "runtime_assets": [asset.filename for asset in assets],
         "hardware": hardware,
-        "installed_at": int(time.time()),
         "source": "Tencent-Hunyuan/Hy-MT2 + ggml-org/llama.cpp",
-    }
+    })
+    # Preserve the legacy fields so versions before multi-model support can
+    # still recognize an existing 1.8B installation after an app downgrade.
+    if selected.name == DEFAULT_MODEL_NAME:
+        manifest.update({
+            "model": selected.name,
+            "model_sha256": selected.sha256,
+            "model_size": selected.size,
+        })
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    info("[Hy-MT2 部署] 已写入本地组件清单，准备自动启动验证")
+    _emit(
+        progress_callback,
+        "manifest_ready",
+        "本地模型配置已保存，准备自动启动验证",
+        completed_bytes,
+        total_bytes,
+    )
     for _asset, archive in runtime_archives:
         archive.unlink(missing_ok=True)
     try:
         downloads.rmdir()
     except OSError:
         pass
-    _emit(progress_callback, "done", "Hy-MT2 离线组件安装完成", total_bytes, total_bytes)
-    return component_status()
+    _emit(progress_callback, "done", f"{selected.label} 安装完成", total_bytes, total_bytes)
+    return component_status(selected.name)
 
 
-def remove_component() -> dict:
+def remove_component(model_name: str | None = None) -> dict:
+    selected = model_spec(selected_model_name() if model_name is None else model_name)
     try:
         from translators.hy_mt2_runtime import shutdown_runtime
 
         shutdown_runtime()
     except Exception:
         pass
-    shutil.rmtree(component_dir(), ignore_errors=True)
-    return component_status()
+    # An adopted external model is only registered here, never owned by EngAixt.
+    _managed_model_path(selected).unlink(missing_ok=True)
+    manifest = _load_manifest()
+    models = _manifest_models(manifest)
+    models.pop(selected.name, None)
+    if models:
+        manifest["models"] = models
+        if manifest.get("model") == selected.name:
+            manifest.pop("model", None)
+            manifest.pop("model_sha256", None)
+            manifest.pop("model_size", None)
+        manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        shutil.rmtree(component_dir(), ignore_errors=True)
+    return component_status(selected.name)
 
 
 def _download(
@@ -331,6 +494,7 @@ def _download(
     total_bytes: int,
 ) -> None:
     if _valid_file(destination, expected_size, expected_sha256):
+        info(f"[Hy-MT2 部署] 已复用校验通过的下载文件: {destination.name}")
         _emit(callback, "asset_ready", f"{label}：已存在", completed_before + expected_size, total_bytes)
         return
     part = destination.with_suffix(destination.suffix + ".part")
@@ -339,6 +503,8 @@ def _download(
     if offset > expected_size:
         part.unlink()
         offset = 0
+    if offset:
+        info(f"[Hy-MT2 部署] 续传 {label}: 已有 {offset / 1024 / 1024:.0f} MB")
     headers = {"User-Agent": "EngAixt-HyMT2/1.0"}
     if offset:
         headers["Range"] = f"bytes={offset}-"
@@ -364,6 +530,7 @@ def _download(
     if not _valid_file(part, expected_size, expected_sha256):
         raise RuntimeError(f"{label} 校验失败，请重试")
     part.replace(destination)
+    info(f"[Hy-MT2 部署] 下载和 SHA-256 校验通过: {destination.name}")
     _emit(callback, "download_done", f"{label}完成", completed_before + expected_size, total_bytes)
 
 
@@ -424,6 +591,129 @@ def _load_manifest() -> dict:
         return json.loads(manifest_path().read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _manifest_models(manifest: dict) -> dict[str, dict]:
+    rows = manifest.get("models")
+    if isinstance(rows, dict):
+        return {str(name): value for name, value in rows.items() if isinstance(value, dict)}
+    # Installations made by earlier versions carried only the selected 1.8B
+    # model in top-level fields. Treat it as an installed verified model.
+    if (
+        str(manifest.get("model") or "") == DEFAULT_MODEL_NAME
+        and str(manifest.get("model_sha256") or "").lower() == model_spec().sha256
+    ):
+        return {
+            DEFAULT_MODEL_NAME: {
+                "sha256": model_spec().sha256,
+                "size": model_spec().size,
+            }
+        }
+    return {}
+
+
+def _registered_model_path(spec: HyMt2ModelSpec, manifest: dict) -> Path:
+    entry = _manifest_models(manifest).get(spec.name, {})
+    registered = str(entry.get("path") or "").strip()
+    if registered:
+        candidate = Path(registered)
+        if _matches_model_size(candidate, spec):
+            return candidate
+    return _managed_model_path(spec)
+
+
+def _model_status(spec: HyMt2ModelSpec, manifest: dict) -> dict:
+    entry = _manifest_models(manifest).get(spec.name, {})
+    path = _registered_model_path(spec, manifest)
+    ready = (
+        _matches_model_size(path, spec)
+        and str(entry.get("sha256") or "").lower() == spec.sha256
+    )
+    candidate = None if ready else _discover_local_model(spec)
+    return {
+        "name": spec.name,
+        "label": spec.label,
+        "description": spec.description,
+        "size": spec.size,
+        "ready": ready,
+        "path": str(path) if ready else "",
+        "candidate_path": str(candidate) if candidate else "",
+    }
+
+
+def _matches_model_size(path: Path, spec: HyMt2ModelSpec) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size == spec.size
+    except OSError:
+        return False
+
+
+def _discover_local_model(spec: HyMt2ModelSpec) -> Path | None:
+    now = time.monotonic()
+    cached = _local_model_discovery_cache.get(spec.name)
+    if cached and now - cached[0] < _LOCAL_MODEL_DISCOVERY_TTL_SECONDS:
+        return cached[1]
+
+    found = None
+    for root in _local_model_search_roots():
+        for directory, child_dirs, filenames in os.walk(root, onerror=lambda _error: None):
+            relative_depth = len(Path(directory).relative_to(root).parts)
+            if relative_depth >= 3:
+                child_dirs.clear()
+            else:
+                child_dirs[:] = [
+                    name
+                    for name in child_dirs
+                    if name.lower() not in {"$recycle.bin", "system volume information", "node_modules"}
+                ]
+            if spec.filename not in filenames:
+                continue
+            candidate = Path(directory) / spec.filename
+            if _matches_model_size(candidate, spec):
+                found = candidate.resolve()
+                break
+        if found:
+            break
+    _local_model_discovery_cache[spec.name] = (now, found)
+    return found
+
+
+def _local_model_search_roots() -> tuple[Path, ...]:
+    home = Path.home()
+    roots = [
+        component_dir() / "model",
+        home / "Downloads" / "models",
+        home / "Downloads" / "AI",
+        home / "Documents" / "models",
+        home / "Documents" / "AI",
+        home / "Desktop" / "models",
+    ]
+    for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+        drive = Path(f"{drive_letter}:\\")
+        if not drive.exists():
+            continue
+        roots.extend(
+            drive / name
+            for name in ("models", "model", "AI", "ai", "LLM", "llm", "hymt2", "HyMT2", "Hy-MT2", "Hunyuan")
+        )
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        normalized = str(resolved).casefold()
+        if normalized in seen or not resolved.is_dir():
+            continue
+        seen.add(normalized)
+        unique.append(resolved)
+    return tuple(unique)
+
+
+def _format_gib(size: int) -> str:
+    return f"{int(size) / 1024 / 1024 / 1024:.1f} GB"
 
 
 def _directory_size(path: Path) -> int:

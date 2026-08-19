@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config import get_config
-from translators.hy_mt2_component import component_status, model_path, runtime_executable
+from translators.hy_mt2_component import (
+    component_status,
+    model_path,
+    runtime_executable,
+    selected_model_name,
+)
 from utils.logger import info, warning
 
 
@@ -36,6 +41,7 @@ class HyMt2Runtime:
         self._log_handle = None
         self._port = 0
         self._active_backend = ""
+        self._active_model = ""
         self._idle_timer: threading.Timer | None = None
         self._inflight = 0
 
@@ -43,6 +49,11 @@ class HyMt2Runtime:
     def active_backend(self) -> str:
         with self._lock:
             return self._active_backend
+
+    @property
+    def active_model(self) -> str:
+        with self._lock:
+            return self._active_model
 
     def complete(self, prompt: str, max_tokens: int) -> LocalCompletion:
         return self.complete_messages(
@@ -78,7 +89,7 @@ class HyMt2Runtime:
                         raise
                     warning(f"Hy-MT2 {self.active_backend} 推理失败，回退 CPU: {exc}")
                     self.stop()
-                    self._start_backend("cpu")
+                    self._start_backend("cpu", selected_model_name())
                     return self._request(normalized, max_tokens)
             finally:
                 with self._lock:
@@ -87,21 +98,62 @@ class HyMt2Runtime:
 
     def ensure_started(self) -> None:
         with self._lock:
-            if self._process and self._process.poll() is None and self._health_ready():
+            selected_model = selected_model_name()
+            if (
+                self._process
+                and self._process.poll() is None
+                and self._active_model == selected_model
+                and self._health_ready()
+            ):
                 return
             self.stop()
-            status = component_status()
+            status = component_status(selected_model)
             if not status.get("ready"):
                 raise HyMt2ComponentMissingError(
                     "Hy-MT2 离线组件未就绪，请在设置中点击“下载/修复离线组件”"
                 )
             preferred = "cuda" if str(status.get("runner", "")).startswith("cuda") else "vulkan"
             try:
-                self._start_backend(preferred)
+                self._start_backend(preferred, selected_model)
             except Exception as exc:
                 warning(f"Hy-MT2 {preferred} 后端启动失败，回退 CPU: {exc}")
                 self.stop()
-                self._start_backend("cpu")
+                self._start_backend("cpu", selected_model)
+
+    def verify_selected_model(self) -> dict[str, str | int | float]:
+        """Boot the chosen backend and prove it can generate before install succeeds."""
+        selected_model = selected_model_name()
+        info(f"[Hy-MT2 部署] 自动启动后端验证: model={selected_model}")
+        with self._request_lock:
+            self._cancel_idle_timer()
+            try:
+                self.ensure_started()
+                completion = self._request(
+                    [{"role": "user", "content": "Reply with READY only."}],
+                    16,
+                )
+                if not completion.content:
+                    raise RuntimeError("本地模型没有返回验证文本")
+                result = {
+                    "model": self.active_model,
+                    "backend": self.active_backend,
+                    "port": self._port,
+                    "prompt_tokens": completion.prompt_tokens,
+                    "completion_tokens": completion.completion_tokens,
+                    "elapsed_seconds": round(completion.elapsed_seconds, 3),
+                }
+                info(
+                    "[Hy-MT2 部署] 后端验证通过: "
+                    f"model={result['model']}, backend={result['backend']}, "
+                    f"生成={result['completion_tokens']} tokens, "
+                    f"耗时={result['elapsed_seconds']}s"
+                )
+                return result
+            finally:
+                # Installation verifies the full path once, then releases memory.
+                # Translation later starts the chosen backend automatically.
+                self.stop()
+                info("[Hy-MT2 部署] 验证完成，已释放本地模型内存")
 
     def stop(self) -> None:
         with self._lock:
@@ -110,6 +162,7 @@ class HyMt2Runtime:
             self._process = None
             self._port = 0
             self._active_backend = ""
+            self._active_model = ""
             if process and process.poll() is None:
                 try:
                     process.terminate()
@@ -126,21 +179,22 @@ class HyMt2Runtime:
                     pass
                 self._log_handle = None
 
-    def _start_backend(self, backend: str) -> None:
+    def _start_backend(self, backend: str, selected_model: str) -> None:
         executable = runtime_executable()
-        if not executable.is_file() or not model_path().is_file():
+        selected_path = model_path(selected_model)
+        if not executable.is_file() or not selected_path.is_file():
             raise HyMt2ComponentMissingError("Hy-MT2 模型或运行器缺失")
         config = get_config()
         context_size = max(1024, min(16384, int(getattr(config, "hy_mt2_context_size", 4096) or 4096)))
         port = _free_port()
         args = [
             str(executable),
-            "-m", str(model_path()),
+            "-m", str(selected_path),
             "-c", str(context_size),
             "--host", "127.0.0.1",
             "--port", str(port),
             "--parallel", "1",
-            "--alias", "hy-mt2",
+            "--alias", selected_model.lower(),
             "--no-webui",
             "--jinja",
         ]
@@ -151,7 +205,7 @@ class HyMt2Runtime:
         else:
             args.extend(["-ngl", "999"])
 
-        log_path = Path(model_path()).parent.parent / "runtime.log"
+        log_path = selected_path.parent.parent / "runtime.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_handle = open(log_path, "w", encoding="utf-8", errors="replace")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -165,13 +219,17 @@ class HyMt2Runtime:
         )
         self._port = port
         self._active_backend = backend
+        self._active_model = selected_model
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             if self._process.poll() is not None:
                 tail = _read_log_tail(log_path)
                 raise RuntimeError(f"llama-server 提前退出: {tail}")
             if self._health_ready():
-                info(f"Hy-MT2 本地运行时已启动: backend={backend}, context={context_size}")
+                info(
+                    f"Hy-MT2 本地运行时已启动: model={selected_model}, "
+                    f"backend={backend}, context={context_size}"
+                )
                 return
             time.sleep(0.25)
         raise TimeoutError(f"Hy-MT2 {backend} 后端启动超时")
@@ -187,7 +245,7 @@ class HyMt2Runtime:
 
     def _request(self, messages: list[dict[str, str]], max_tokens: int) -> LocalCompletion:
         payload = json.dumps({
-            "model": "hy-mt2",
+            "model": self.active_model or selected_model_name(),
             "messages": messages,
             "temperature": 0.2,
             "top_p": 0.6,
@@ -255,10 +313,15 @@ def shutdown_runtime() -> None:
     _RUNTIME.stop()
 
 
+def verify_selected_model() -> dict[str, str | int | float]:
+    return _RUNTIME.verify_selected_model()
+
+
 def runtime_status() -> dict[str, str | bool]:
     return {
         "running": bool(_RUNTIME._process and _RUNTIME._process.poll() is None),
         "active_backend": _RUNTIME.active_backend,
+        "active_model": _RUNTIME.active_model,
     }
 
 

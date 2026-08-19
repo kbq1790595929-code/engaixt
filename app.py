@@ -8,8 +8,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 
 
-import webview
-
 from config import get_config, save_config
 from core.clipboard_service import get_clipboard_text, set_clipboard_text
 from core.resources import resource_path, app_root
@@ -969,7 +967,7 @@ class Api:
 
                     game_path = Path(game_dir)
 
-                    if not game_path.exists():
+                    if not game_path.is_dir():
                         missing_seen = True
                         continue
 
@@ -1478,20 +1476,53 @@ class Api:
 
     def install_hy_mt2_component(self):
         self._js("on_status('下载离线模型')")
-        self._js("on_log(20, '开始下载腾讯 Hy-MT2 离线翻译组件...')")
+        try:
+            from translators.hy_mt2_component import component_status
+
+            model_label = str(component_status().get("model_label") or "腾讯 Hy-MT2 离线模型")
+        except Exception:
+            model_label = "腾讯 Hy-MT2 离线模型"
+        self._js("on_log(20, " + json.dumps(f"开始下载 {model_label}...", ensure_ascii=False) + ")")
+
+        last_logged_percent = {"value": -10.0}
 
         def progress(event: dict):
             message = str(event.get("message") or "下载 Hy-MT2 离线组件")
+            phase = str(event.get("phase") or "")
             percent = float(event.get("percent") or 0)
             self._js(f"on_progress({json.dumps(message, ensure_ascii=False)}, {percent:.2f})")
             self._js("onHyMt2InstallProgress(" + json.dumps(event, ensure_ascii=False) + ")")
+            report_progress = phase != "download" or percent >= last_logged_percent["value"] + 10
+            if report_progress:
+                last_logged_percent["value"] = percent
+                suffix = f" ({percent:.0f}%)" if phase == "download" else ""
+                self._js("on_log(20, " + json.dumps(message + suffix, ensure_ascii=False) + ")")
 
         def _run(task):
             try:
                 from translators.hy_mt2_component import install_component
+                from translators.hy_mt2_runtime import verify_selected_model
 
                 status = install_component(progress)
-                self._js("on_log(20, 'Hy-MT2 离线翻译组件已就绪')")
+                verification_message = "自动启动本地后端并执行健康检查"
+                progress({
+                    "phase": "verify_backend",
+                    "message": verification_message,
+                    "current_bytes": 1,
+                    "total_bytes": 1,
+                    "percent": 100,
+                })
+                self._js("on_log(20, " + json.dumps(
+                    f"{status.get('model_label') or 'Hy-MT2 离线模型'} 已下载，正在自动配置并验证本地后端...",
+                    ensure_ascii=False,
+                ) + ")")
+                verification = verify_selected_model()
+                status["deployment_verification"] = verification
+                self._js("on_log(20, " + json.dumps(
+                    f"{status.get('model_label') or 'Hy-MT2 离线模型'} 已完成一键部署："
+                    f"{verification.get('backend') or 'unknown'} 后端已验证",
+                    ensure_ascii=False,
+                ) + ")")
                 self._js("on_progress('离线组件安装完成', 100)")
                 self._js("on_status('空闲')")
                 self._js("onHyMt2Status(" + json.dumps(status, ensure_ascii=False) + ")")
@@ -1509,7 +1540,9 @@ class Api:
                 from translators.hy_mt2_component import remove_component
 
                 status = remove_component()
-                self._js("on_log(20, 'Hy-MT2 离线组件已删除')")
+                self._js("on_log(20, " + json.dumps(
+                    f"{status.get('model_label') or 'Hy-MT2 离线模型'} 已删除", ensure_ascii=False
+                ) + ")")
                 self._js("onHyMt2Status(" + json.dumps(status, ensure_ascii=False) + ")")
             except Exception as exc:
                 self._js("on_log(50, " + json.dumps("删除 Hy-MT2 组件失败: " + str(exc), ensure_ascii=False) + ")")
@@ -1962,6 +1995,19 @@ class Api:
 
 
 if __name__ == "__main__":
+    from core.gui_gpu_preference import configure_high_performance_gui_gpu
+
+    gpu_preference = configure_high_performance_gui_gpu()
+    print(
+        "[GUI GPU] high-performance preference: "
+        f"host_registry={gpu_preference['host_registry_preference']}, "
+        f"webview_registry={gpu_preference['webview_registry_preference']}, "
+        f"d3d11={gpu_preference['webview_d3d11']}, "
+        f"hardware_override={gpu_preference['webview_hardware_override']}, "
+        f"exe={gpu_preference['executable']}"
+    )
+    import webview
+
     try:
         from core.app_update import exit_if_update_pending_at_startup
 
