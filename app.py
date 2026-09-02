@@ -23,8 +23,7 @@ _UNITY_REALTIME_ENGINE_NAMES = {"unity", "xunity_realtime", "unity_arch000_lua"}
 _SUPPORT_LINKS = {
     "official": "https://engaixt.com/",
     "feedback": "mailto:contact@example.com?subject=EngAixt%20%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88",
-    "upgrade": "https://ifdian.net/a/engaixt",
-    "renew": "https://ifdian.net/a/engaixt",
+    "sponsor": "https://ifdian.net/a/engaixt",
 }
 
 
@@ -223,10 +222,12 @@ class Api:
 
         self._window = None
         # 统一任务管理器：所有长任务线程都经它派发，共享状态/取消/计数/结果台账。
-        # 计数归零回调保持旧 _end_active_task 的行为：推送 refreshLicenseStatus()。
+        # 计数归零回调保留为空，避免任务完成时触发已移除的会员状态刷新。
         self._tasks = TaskManager(on_active_drained=self._on_active_drained)
         self._background_tool_update_started = False
         self._background_tool_update_lock = threading.Lock()
+        self._preflight_lock = threading.Lock()
+        self._preflight_paths: set[str] = set()
 
 
 
@@ -243,8 +244,7 @@ class Api:
             self._window.evaluate_js(code)
 
     def _on_active_drained(self):
-        # 活动任务计数归零时刷新授权状态（与旧 _end_active_task 归零分支逐字一致）。
-        self._js("if (typeof refreshLicenseStatus === 'function') refreshLicenseStatus();")
+        return None
 
     # 兼容垫片：begin/end 供尚未收编成 TaskManager.submit 的调用方或外部隐性依赖使用。
     def _begin_active_task(self):
@@ -375,44 +375,61 @@ class Api:
 
 
 
-    def get_license_status(self):
+    def get_cloud_model_catalog(self, provider: str):
+        """Return the last provider model list request without exposing secrets."""
+        from core.cloud_model_catalog import fetch_model_catalog
+        from translators.factory import translator_api_key
 
-        try:
-            from core.trial_quota import trial_status
+        config = get_config()
+        key = translator_api_key(provider, config)
+        return fetch_model_catalog(provider, key)
 
-            return trial_status().to_dict()
-        except Exception as exc:
-            return {
-                "edition": "unknown",
-                "error": str(exc),
-            }
+    def refresh_cloud_model_catalog(self, provider: str):
+        """Refresh models on explicit UI actions only; translation never calls this."""
+        return self.get_cloud_model_catalog(provider)
 
-    def activate_monthly_member(self, code: str):
-        try:
-            from core.monthly_license import MonthlyLicenseError, decode_monthly_license_code
-            from core.trial_quota import activate_monthly_license
+    def get_cloud_pricing(self, provider: str, model: str):
+        from core.cloud_model_catalog import pricing_for_display
 
-            license_info = decode_monthly_license_code(str(code or ""))
-            status = activate_monthly_license(license_info.raw_code)
-            if status.edition == "unlimited":
-                message = f"会员激活成功，有效期至 {status.license_expires_at}"
-            else:
-                message = f"会员码已保存，将于 {license_info.valid_from.isoformat()} 自动生效"
-            return {
-                "ok": True,
-                "message": message,
-                "status": status.to_dict(),
-            }
-        except MonthlyLicenseError as exc:
-            return {
-                "ok": False,
-                "message": str(exc),
-            }
-        except Exception as exc:
-            return {
-                "ok": False,
-                "message": f"会员激活失败: {exc}",
-            }
+        display = pricing_for_display(provider, model, refresh=True)
+        return {
+            "provider": str(provider or "").strip().lower(),
+            "model": str(model or ""),
+            "pricing": display["pricing"],
+            "pricing_source": display["pricing_source"],
+            "price_synced": display["pricing_source"] == "online_catalog",
+            "price_synced_at": display["price_synced_at"],
+        }
+
+    def estimate_translation_cost(
+        self,
+        path: str,
+        provider: str = "",
+        model: str = "",
+        text_count: int | None = None,
+        source_chars: int = 0,
+    ):
+        from core.cloud_model_catalog import estimate_game_cost, estimate_game_cost_from_counts
+        from translators.factory import translator_model
+
+        config = get_config()
+        provider_key = str(provider or config.active_translator or "").strip().lower()
+        model_key = str(model or translator_model(provider_key, config) or "")
+        if text_count is not None:
+            return estimate_game_cost_from_counts(
+                path,
+                provider_key,
+                model_key,
+                text_count=max(0, int(text_count or 0)),
+                source_chars=max(0, int(source_chars or 0)),
+            )
+        return estimate_game_cost(path, provider_key, model_key)
+
+    def get_usage_statistics(self, range_key: str = "30d"):
+        """Return aggregated local token, cost, cache, and task statistics."""
+        from core.usage_statistics import get_usage_statistics
+
+        return get_usage_statistics(range_key)
 
     def get_app_update_info(self):
         try:
@@ -428,7 +445,6 @@ class Api:
                 info = {
                     "app": "EngAixt",
                     "version": "unknown",
-                    "edition": "unknown",
                     "can_apply_update": False,
                 }
             info.update({
@@ -455,6 +471,10 @@ class Api:
         for k, v in data.items():
 
             if hasattr(c, k):
+                if k.endswith("_model") and str(v or "") == "__provider_default__":
+                    # The UI uses a provider-level label when no API key is set;
+                    # keep the validated internal default model ID for requests.
+                    continue
                 if k.endswith("_api_key") and isinstance(v, str) and not v.strip():
                     continue
 
@@ -858,6 +878,55 @@ class Api:
         self._do_run(path, extract_only=True)
 
         return True
+
+    def preflight_extract(self, path: str, engine_name: str = ""):
+        """Run selection-time extraction without invoking AI or patching files."""
+        from core.gui_preflight import preflight_extract
+
+        resolved = self.resolve_path(path)
+        key = str(Path(resolved).resolve()).casefold()
+        with self._preflight_lock:
+            if key in self._preflight_paths:
+                return {"started": False, "reason": "already_running"}
+            self._preflight_paths.add(key)
+
+        def _run(task):
+            def progress_cb(step: str, pct: float):
+                self._js(f"on_progress({json.dumps(step)}, {float(pct):.2f})")
+
+            def meta_cb(meta_key: str, value):
+                payload = value
+                if meta_key in {"extraction_stats", "preflight_result"}:
+                    payload = dict(value) if isinstance(value, dict) else {"value": value}
+                    payload.setdefault("path", resolved)
+                self._js(f"on_meta({json.dumps(meta_key)}, {json.dumps(payload, ensure_ascii=False)})")
+
+            try:
+                self._js("on_status('运行中')")
+                self._js(f"on_log(20, {json.dumps('开始预检：解包并提取文本，不会开始翻译')})")
+                success = preflight_extract(
+                    resolved,
+                    engine_name=str(engine_name or ""),
+                    progress_callback=progress_cb,
+                    meta_callback=meta_cb,
+                )
+                if success:
+                    self._js("on_log(20, '预检完成：已计算预估费用，等待用户开始翻译')")
+                    self._js("on_status('空闲')")
+                else:
+                    self._js("on_log(50, '预检提取失败：未开始 AI 翻译')")
+                    self._js("on_status('失败')")
+                return bool(success)
+            except Exception as exc:
+                self._js(f"on_log(50, {json.dumps(f'预检提取失败: {exc}', ensure_ascii=False)})")
+                self._js("on_status('失败')")
+                return False
+            finally:
+                with self._preflight_lock:
+                    self._preflight_paths.discard(key)
+
+        self._tasks.submit("预检提取", _run, kind="preflight", counted=True)
+        return {"started": True, "path": resolved}
 
 
 
@@ -1892,7 +1961,13 @@ class Api:
 
                 else:
 
-                    success = pipeline.run(path, launch=cfg.auto_launch, injector=injector)
+                    # Selection-time preflight already produced the checkpoint;
+                    # checkpoint mode reuses it and only extracts on a cold run.
+                    success = pipeline.run_with_checkpoint(
+                        path,
+                        launch=cfg.auto_launch,
+                        injector=injector,
+                    )
 
 
 

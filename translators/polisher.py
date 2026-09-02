@@ -15,7 +15,7 @@ from translators.base import retry_with_backoff
 from translators.cache import (
     get_cache,
 )
-from translators.pricing import DEEPSEEK_V4_FLASH, cost_cny, pricing_dict
+from translators.pricing import DEEPSEEK_V4_FLASH, cost_cny
 from utils.logger import info, warning
 from utils.text_extract import (
     is_acceptable_same_as_source,
@@ -64,6 +64,8 @@ class PolishStats:
     estimated_cost_cny: float = 0.0
     actual_input_tokens: int = 0
     actual_output_tokens: int = 0
+    actual_cache_hit_input_tokens: int = 0
+    actual_cache_miss_input_tokens: int = 0
     actual_cost_cny: float = 0.0
     provider: str = "deepseek"
     model: str = MODEL
@@ -74,8 +76,6 @@ class PolishStats:
     def add_api_call(self, prompt: str, result: str, usage: Any = None) -> None:
         cache = get_cache()
         self.api_request_count += 1
-        before_estimated = float(self.estimated_cost_cny)
-        before_actual = float(self.actual_cost_cny)
         self.estimated_input_tokens += cache.estimate_tokens(prompt)
         self.estimated_output_tokens += cache.estimate_tokens(result)
         self.estimated_cost_cny = _cost(self.estimated_input_tokens, self.estimated_output_tokens)
@@ -90,33 +90,19 @@ class PolishStats:
                 self.actual_input_tokens += int(prompt_tokens)
             if completion_tokens is not None:
                 self.actual_output_tokens += int(completion_tokens)
-            self.actual_cost_cny = _cost(self.actual_input_tokens, self.actual_output_tokens)
-        if usage is not None and self.actual_cost_cny > before_actual:
-            cost_delta = round(self.actual_cost_cny - before_actual, 6)
-            cost_basis = "actual"
-        else:
-            cost_delta = round(self.estimated_cost_cny - before_estimated, 6)
-            cost_basis = "estimated"
-        if cost_delta > 0:
-            try:
-                from core.trial_quota import TrialQuotaExceeded, charge_translation_cost
-
-                charge_translation_cost(
-                    cost_delta,
-                    source="deepseek_polish_api",
-                    details={
-                        "basis": cost_basis,
-                        "provider": self.provider,
-                        "model": self.model,
-                        "polish_version": self.polish_version,
-                        "pricing": pricing_dict(self.provider, self.model),
-                    },
-                )
-            except TrialQuotaExceeded:
-                raise
-            except Exception:
-                pass
-
+            cached_input = getattr(usage, "prompt_cache_hit_tokens", None)
+            if cached_input is None:
+                details = getattr(usage, "prompt_tokens_details", None)
+                cached_input = getattr(details, "cached_tokens", None) if details is not None else None
+            actual_input = int(prompt_tokens or 0) if prompt_tokens is not None else 0
+            cached_input = max(0, min(actual_input, int(cached_input or 0)))
+            self.actual_cache_hit_input_tokens += cached_input
+            self.actual_cache_miss_input_tokens += max(0, actual_input - cached_input)
+            self.actual_cost_cny = _cost(
+                self.actual_input_tokens,
+                self.actual_output_tokens,
+                cache_hit_input_tokens=self.actual_cache_hit_input_tokens,
+            )
     def to_dict(self) -> dict[str, Any]:
         return {
             "total_texts": self.total_texts,
@@ -137,6 +123,8 @@ class PolishStats:
             "estimated_cost_cny": self.estimated_cost_cny,
             "actual_input_tokens": self.actual_input_tokens,
             "actual_output_tokens": self.actual_output_tokens,
+            "actual_cache_hit_input_tokens": self.actual_cache_hit_input_tokens,
+            "actual_cache_miss_input_tokens": self.actual_cache_miss_input_tokens,
             "actual_cost_cny": self.actual_cost_cny,
             "provider": self.provider,
             "model": self.model,
@@ -287,9 +275,6 @@ class DeepSeekPolisher:
 
     async def _call_json(self, client: Any, prompt: str, max_tokens: int, stats: PolishStats) -> str:
         async def call():
-            from core.trial_quota import ensure_translation_quota_available
-
-            ensure_translation_quota_available()
             resp = await client.chat.completions.create(
                 model=MODEL,
                 messages=[{"role": "user", "content": prompt}],
@@ -499,5 +484,11 @@ def _mark_polished(item: TextItem) -> None:
     }
 
 
-def _cost(input_tokens: int, output_tokens: int) -> float:
-    return cost_cny(input_tokens, output_tokens, "deepseek", MODEL)
+def _cost(input_tokens: int, output_tokens: int, *, cache_hit_input_tokens: int = 0) -> float:
+    return cost_cny(
+        input_tokens,
+        output_tokens,
+        "deepseek",
+        MODEL,
+        cache_hit_input_tokens=cache_hit_input_tokens,
+    )

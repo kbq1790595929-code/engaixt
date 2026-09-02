@@ -6,6 +6,7 @@
 <title>EngAixt</title>
 <link rel="icon" href="app.ico">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="usage_statistics.css">
 <link rel="stylesheet" href="local_model_settings.css">
 </head>
 <body>
@@ -22,6 +23,7 @@
   <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
   <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h17"/><path d="m7 15 3-4 3 2 5-7"/><path d="M18 6h2v2"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
@@ -39,6 +41,7 @@
   <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 5.8 1c-.42.7-1.05 1.1-1.65 1.5-.7.46-1.25.82-1.25 1.8"/><path d="M12 17h.01"/></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
   <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></symbol>
   <symbol id="i-crown" viewBox="0 0 24 24"><path d="m2 6 5 12h10l5-12-6 5-4-8-4 8-6-5z"/><path d="M7 18h10"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M2.6 17.4A2 2 0 0 0 2 18.8V21a1 1 0 0 0 1 1h3v-3h3v-3h3l1.4-1.4"/><circle cx="16.5" cy="7.5" r="5.5"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
@@ -65,6 +68,9 @@
       </button>
       <button class="nav-item" id="nav-games" onclick="navTo('games')">
         <svg class="ic"><use href="#i-gamepad"/></svg><span class="nav-label">游戏库</span>
+      </button>
+      <button class="nav-item" id="nav-statistics" onclick="navTo('statistics')">
+        <svg class="ic"><use href="#i-chart"/></svg><span class="nav-label">统计</span>
       </button>
       <button class="nav-item" onclick="openSettings()">
         <svg class="ic"><use href="#i-gear"/></svg><span class="nav-label">设置</span>
@@ -99,10 +105,6 @@
   <!-- ── 主内容区 ── -->
   <main class="content">
     <div class="top-actions">
-      <div class="license-pill loading" id="license-pill" title="试用额度">
-        <svg class="ic"><use href="#i-activity"/></svg>
-        <span id="license-text">读取额度…</span>
-      </div>
       <div class="support-actions" aria-label="支持入口">
         <button class="top-link-trigger" onclick="openSupportLink('official')" title="官网">
           <svg class="ic"><use href="#i-globe"/></svg>
@@ -112,17 +114,9 @@
           <svg class="ic"><use href="#i-message"/></svg>
           <span>反馈问题</span>
         </button>
-        <button class="top-link-trigger" id="activate-license-btn" onclick="openLicenseActivation()" title="激活会员">
-          <svg class="ic"><use href="#i-key"/></svg>
-          <span>激活会员</span>
-        </button>
-        <button class="top-link-trigger cta" id="upgrade-link" onclick="openSupportLink('upgrade')" title="升级无额度版">
-          <svg class="ic"><use href="#i-crown"/></svg>
-          <span>升级无额度版</span>
-        </button>
-        <button class="top-link-trigger cta" id="renew-link" onclick="openSupportLink('renew')" title="无额度版续费" hidden>
-          <svg class="ic"><use href="#i-refresh"/></svg>
-          <span>续费</span>
+        <button class="top-link-trigger cta" id="sponsor-link" onclick="openSupportLink('sponsor')" title="赞助作者">
+          <svg class="ic"><use href="#i-heart"/></svg>
+          <span>赞助作者</span>
         </button>
       </div>
       <button class="help-trigger" onclick="openHelp()" title="使用说明">
@@ -224,7 +218,10 @@
 
         <div class="progress-wrap">
           <div class="progress-meta">
-            <span class="progress-label" id="status-step">就绪</span>
+            <div class="progress-label-group">
+              <span class="progress-label" id="status-step">就绪</span>
+              <span class="local-speed" id="local-speed" hidden></span>
+            </div>
             <span id="status-pct" hidden></span>
             <span class="progress-text" id="progress-text">0%</span>
           </div>
@@ -233,6 +230,7 @@
             <span class="stat" id="stat-texts"><svg class="ic"><use href="#i-terminal"/></svg><span id="stat-text-count">0</span> 条文本</span>
             <span class="stat" id="stat-translated"><svg class="ic"><use href="#i-check"/></svg><span id="stat-trans-cur">0</span> / <span id="stat-trans-total">0</span> 已翻译</span>
             <span class="stat dim" id="stat-files"><span id="stat-file-count">0</span> 个文件</span>
+            <span class="stat cost-stat" id="stat-cost-estimate" hidden><svg class="ic"><use href="#i-activity"/></svg><span id="stat-cost-text"></span></span>
           </div>
         </div>
 
@@ -295,27 +293,107 @@
         </div>
       </div>
 
+      <!-- 使用统计页 -->
+      <div id="statistics-page" class="page">
+        <div class="statistics-page-inner">
+          <header class="statistics-header">
+            <div>
+              <div class="statistics-eyebrow">成功记录</div>
+              <h1>使用统计</h1>
+              <p class="page-sub">只记录完整翻译成功的作品，失败与进行中的任务不会计入</p>
+            </div>
+            <button class="icon-btn statistics-refresh" onclick="loadUsageStatistics(true)" title="刷新统计" aria-label="刷新统计">
+              <svg class="ic"><use href="#i-refresh"/></svg>
+            </button>
+          </header>
+
+          <div class="statistics-toolbar">
+            <div class="range-switch" role="group" aria-label="统计时间范围">
+              <button class="range-btn active" data-range="latest" aria-pressed="true" onclick="selectUsageRange('latest')">最近一次任务</button>
+              <button class="range-btn" data-range="7d" onclick="selectUsageRange('7d')">近 7 天</button>
+              <button class="range-btn" data-range="30d" onclick="selectUsageRange('30d')">近 30 天</button>
+              <button class="range-btn" data-range="90d" onclick="selectUsageRange('90d')">近 90 天</button>
+              <button class="range-btn" data-range="all" onclick="selectUsageRange('all')">全部</button>
+            </div>
+            <span class="statistics-updated" id="statistics-updated">等待读取</span>
+          </div>
+
+          <div class="statistics-loading-indicator" id="statistics-loading" hidden>
+            <span class="statistics-loading-dot"></span>正在读取本地统计...
+          </div>
+          <div class="statistics-state empty" id="statistics-empty" hidden>
+            <div>
+              <div class="statistics-empty-mark" aria-hidden="true"><svg class="ic"><use href="#i-chart"/></svg></div>
+              <h2>还没有成功翻译记录</h2>
+              <p>新统计从现在开始。完成一次完整翻译与回填后，作品名、引擎、Token 和费用会出现在这里；旧统计不会迁入。</p>
+            </div>
+          </div>
+
+          <div class="statistics-content" id="statistics-content">
+            <section class="usage-kpis" aria-label="统计概览">
+              <article class="usage-kpi usage-kpi-main">
+                <span class="usage-kpi-label">成功作品</span>
+                <strong id="usage-success-runs">0</strong>
+                <span class="usage-kpi-note" id="usage-run-detail">0 / 0 条文本</span>
+              </article>
+              <article class="usage-kpi">
+                <span class="usage-kpi-label">总 Token</span>
+                <strong id="usage-total-tokens">0</strong>
+                <span class="usage-kpi-note" id="usage-token-detail">输入 0 · 输出 0</span>
+              </article>
+              <article class="usage-kpi">
+                <span class="usage-kpi-label">总费用</span>
+                <strong id="usage-display-cost">¥0.00</strong>
+                <span class="usage-kpi-note" id="usage-cost-detail">暂无费用</span>
+              </article>
+              <article class="usage-kpi">
+                <span class="usage-kpi-label">缓存命中率</span>
+                <strong id="usage-cache-rate">0%</strong>
+                <span class="usage-kpi-note" id="usage-cache-detail">命中 0 · 未命中 0</span>
+              </article>
+            </section>
+
+            <section class="statistics-grid">
+              <article class="usage-panel usage-trend-panel">
+                <div class="usage-panel-head">
+                  <div><h2>成功任务趋势</h2><p>按完成日期汇总 Token 与费用</p></div>
+                  <div class="usage-legend"><span><i class="legend-dot token"></i>Token</span><span><i class="legend-dot cost"></i>费用</span></div>
+                </div>
+                <div class="usage-trend" id="usage-trend"></div>
+              </article>
+              <article class="usage-panel">
+                <div class="usage-panel-head"><div><h2>服务商与模型</h2><p>按成功任务 Token 排序</p></div></div>
+                <div class="usage-rank-list" id="usage-providers"></div>
+              </article>
+            </section>
+
+            <section class="statistics-grid">
+              <article class="usage-panel">
+                <div class="usage-panel-head"><div><h2>引擎分布</h2><p>只统计完整成功的作品</p></div></div>
+                <div class="usage-rank-list" id="usage-engines"></div>
+              </article>
+              <article class="usage-panel usage-request-panel">
+                <div class="usage-panel-head"><div><h2>请求与缓存</h2><p>成功任务累计</p></div></div>
+                <div class="usage-metric-list">
+                  <div><span>API 请求</span><strong id="usage-api-requests">0</strong></div>
+                  <div><span>Prompt 缓存 Token</span><strong id="usage-prompt-cache">0</strong></div>
+                  <div><span>估算节省费用</span><strong id="usage-saved-cost">¥0.00</strong></div>
+                </div>
+              </article>
+            </section>
+
+            <section class="usage-panel usage-runs-panel">
+              <div class="usage-panel-head"><div><h2>成功作品</h2><p>作品名在完成时固化，不受之后的目录改名影响</p></div></div>
+              <div class="usage-runs-wrap">
+                <table class="usage-runs"><thead><tr><th>作品名</th><th>引擎</th><th>模型</th><th>总 Token</th><th>费用</th><th>完成时间</th></tr></thead><tbody id="usage-runs"></tbody></table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
     </div>
   </main>
-</div>
-
-<div class="overlay" id="license-activation-overlay">
-  <div class="overlay-content license-activation-content">
-    <div class="modal-head">
-      <h2>激活会员</h2>
-      <button class="icon-btn" onclick="closeLicenseActivation()" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
-    </div>
-    <div class="field">
-      <label for="license-code-input">月度会员激活码</label>
-      <textarea id="license-code-input" class="mono license-code-input" spellcheck="false" placeholder="EAI2..."></textarea>
-    </div>
-    <div class="license-activation-result" id="license-activation-result" role="status" hidden></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeLicenseActivation()">取消</button>
-      <button class="btn" onclick="pasteLicenseCode()"><svg class="ic"><use href="#i-import"/></svg>粘贴</button>
-      <button class="btn btn-primary" id="license-activate-submit" onclick="activateMonthlyMember()"><svg class="ic"><use href="#i-key"/></svg>激活</button>
-    </div>
-  </div>
 </div>
 
 <!-- ── 使用说明 ── -->
@@ -606,20 +684,27 @@
 
     <!-- 云端模型 -->
     <div class="tab-panel active" id="tab-api">
+      <div class="cloud-model-toolbar">
+        <button type="button" class="btn btn-sm" id="refresh-cloud-models" title="从当前服务商读取最新模型">
+          <svg class="ic"><use href="#i-refresh"/></svg>刷新模型列表
+        </button>
+        <span class="settings-note" id="cloud-model-status">打开设置后可读取当前服务商的模型列表</span>
+      </div>
       <div class="field"><label>OpenAI API Key</label><div class="secret-input"><input type="password" class="mono" name="openai_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('openai_api_key')" aria-label="显示 OpenAI API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>OpenAI 模型</label><select name="openai_model"><option value="gpt-5.4-mini">GPT-5.4 mini（推荐）</option><option value="gpt-5.5">GPT-5.5</option><option value="gpt-5.5-pro">GPT-5.5 Pro</option><option value="gpt-5.4">GPT-5.4</option><option value="gpt-5.4-pro">GPT-5.4 Pro</option><option value="gpt-5.4-nano">GPT-5.4 nano</option><option value="gpt-4.1">GPT-4.1</option><option value="gpt-4.1-mini">GPT-4.1 mini</option><option value="gpt-4o">GPT-4o（旧版）</option><option value="gpt-4o-mini">GPT-4o mini（旧版）</option></select></div>
+      <div class="field"><label>OpenAI 模型</label><select name="openai_model"><option value="__provider_default__">ChatGPT</option></select></div>
       <div class="field"><label>DeepSeek API Key</label><div class="secret-input"><input type="password" class="mono" name="deepseek_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('deepseek_api_key')" aria-label="显示 DeepSeek API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>DeepSeek 模型</label><select name="deepseek_model"><option value="deepseek-v4-flash">深度求索 V4 Flash（推荐）</option><option value="deepseek-v4-pro">深度求索 V4 Pro</option><option value="deepseek-chat">深度求索 Chat（兼容）</option><option value="deepseek-reasoner">深度求索 Reasoner（推理）</option></select></div>
+      <div class="field"><label>DeepSeek 模型</label><select name="deepseek_model"><option value="__provider_default__">DeepSeek</option></select></div>
       <div class="field"><label>通义千问 API Key</label><div class="secret-input"><input type="password" class="mono" name="qwen_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('qwen_api_key')" aria-label="显示通义千问 API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>通义千问模型</label><select name="qwen_model"><option value="qwen3.7-plus">千问 3.7 Plus（推荐）</option><option value="qwen3.7-max">千问 3.7 Max</option><option value="qwen3.6-flash">千问 3.6 Flash（低成本）</option><option value="qwen-plus">千问 Plus（兼容旧版）</option><option value="qwen-turbo">千问 Turbo（兼容旧版）</option></select></div>
+      <div class="field"><label>通义千问模型</label><select name="qwen_model"><option value="__provider_default__">通义千问</option></select></div>
       <div class="field"><label>智谱 GLM API Key</label><div class="secret-input"><input type="password" class="mono" name="zhipu_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('zhipu_api_key')" aria-label="显示智谱 GLM API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>智谱 GLM 模型</label><select name="zhipu_model"><option value="glm-4.7-flash">智谱 GLM-4.7 Flash（推荐）</option><option value="glm-5.2">智谱 GLM-5.2</option><option value="glm-5.1">智谱 GLM-5.1</option><option value="glm-5">智谱 GLM-5</option><option value="glm-4.7">智谱 GLM-4.7</option><option value="glm-4-flash">智谱 GLM-4 Flash（兼容旧版）</option></select></div>
+      <div class="field"><label>智谱 GLM 模型</label><select name="zhipu_model"><option value="__provider_default__">智谱 GLM</option></select></div>
       <div class="field"><label>Kimi API Key</label><div class="secret-input"><input type="password" class="mono" name="moonshot_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('moonshot_api_key')" aria-label="显示 Kimi API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>Kimi 模型</label><select name="moonshot_model"><option value="kimi-k2.6">Kimi K2.6（推荐）</option><option value="kimi-k2.7-code">Kimi K2.7 Code</option><option value="moonshot-v1-8k">月之暗面 V1 8K（兼容）</option><option value="moonshot-v1-32k">月之暗面 V1 32K</option><option value="moonshot-v1-128k">月之暗面 V1 128K</option></select></div>
+      <div class="field"><label>Kimi 模型</label><select name="moonshot_model"><option value="__provider_default__">Kimi</option></select></div>
       <div class="field"><label>火山方舟 API Key</label><div class="secret-input"><input type="password" class="mono" name="doubao_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('doubao_api_key')" aria-label="显示火山方舟 API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>火山方舟模型 / Endpoint</label><select name="doubao_model"><option value="doubao-seed-2-1-turbo-260628">豆包 Seed 2.1 Turbo（推荐）</option><option value="doubao-seed-2-1-pro-260628">豆包 Seed 2.1 Pro</option><option value="doubao-seed-evolving">豆包 Seed Evolving（持续进化）</option><option value="doubao-seed-1-6-flash-250615">豆包 Seed 1.6 Flash（兼容旧版）</option><option value="doubao-seed-1-6-250615">豆包 Seed 1.6</option></select></div>
+      <div class="field"><label>火山方舟模型 / Endpoint</label><select name="doubao_model"><option value="__provider_default__">豆包</option></select></div>
       <div class="field"><label>Anthropic API Key</label><div class="secret-input"><input type="password" class="mono" name="anthropic_api_key" autocomplete="off" spellcheck="false"><button type="button" class="secret-toggle" onclick="toggleSecretInput('anthropic_api_key')" aria-label="显示 Anthropic API Key" title="显示/隐藏 API Key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
-      <div class="field"><label>Claude 模型</label><select name="anthropic_model"><option value="claude-sonnet-5">Claude Sonnet 5（推荐）</option><option value="claude-fable-5">Claude Fable 5</option><option value="claude-opus-4-8">Claude Opus 4.8</option><option value="claude-haiku-4-5">Claude Haiku 4.5</option><option value="claude-sonnet-4-6">Claude Sonnet 4.6（旧版）</option><option value="claude-haiku-4-5-20251001">Claude Haiku 4.5（旧版带日期）</option></select></div>
+      <div class="field"><label>Claude 模型</label><select name="anthropic_model"><option value="__provider_default__">Claude</option></select></div>
+      <div class="settings-note cloud-price-note" id="cloud-model-price"></div>
     </div>
 
     <!-- 本地模型 -->
@@ -651,6 +736,7 @@
           <label>离线模型</label>
           <select name="hy_mt2_model" onchange="onHyMt2ModelChanged(this.value)">
             <option value="Hy-MT2-1.8B-Q4_K_M">Hy-MT2 1.8B（轻量，约 1.1 GB）</option>
+            <option value="HY-MT2-7B-Q4_K_M">Hy-MT2 7B Q4（推荐，约 4.3 GB）</option>
             <option value="HY-MT2-7B-Q8_0">Hy-MT2 7B（高质量，约 7.4 GB）</option>
           </select>
         </div>
@@ -659,13 +745,13 @@
           <button type="button" class="btn secondary" id="hy-mt2-install-btn" onclick="installHyMt2()"><svg class="ic"><use href="#i-download"/></svg>下载/修复当前模型</button>
           <button type="button" class="icon-btn" id="hy-mt2-remove-btn" onclick="removeHyMt2()" title="删除当前模型" aria-label="删除当前模型" hidden><svg class="ic"><use href="#i-trash"/></svg></button>
         </div>
-        <div class="settings-note hy-mt2-note">两个模型可同时保留，切换不会删除另一个模型。模型和运行器从腾讯 ModelScope 与 llama.cpp 官方源下载，不计入安装包；翻译完全在本机运行，不消耗试用额度。</div>
+        <div class="settings-note hy-mt2-note">两个模型可同时保留，切换不会删除另一个模型。模型和运行器从腾讯 ModelScope 与 llama.cpp 官方源下载，不计入安装包；翻译完全在本机运行，不调用云端翻译 API。</div>
       </div>
     </div>
 
     <!-- 翻译设置 -->
     <div class="tab-panel" id="tab-trans">
-      <div class="field"><label>当前翻译器</label><select name="active_translator" onchange="onTranslatorChanged(this.value)"><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="zhipu">智谱 GLM</option><option value="moonshot">Kimi</option><option value="doubao">豆包 / 火山方舟</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="hy_mt2">腾讯 Hy-MT2（离线）</option></select></div>
+      <div class="field"><label>当前翻译器</label><select name="active_translator" onchange="onTranslatorChanged(this.value)"><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="zhipu">智谱 GLM</option><option value="moonshot">Kimi</option><option value="doubao">豆包 / 火山方舟</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="hy_mt2">腾讯 Hy-MT2（离线）</option></select><div class="settings-note" id="active-cloud-model"></div></div>
       <div class="field"><label>目标语言</label><select name="target_lang" onchange="syncSettingValue('target_lang', this.value)"><option>zh-CN</option><option>zh-TW</option><option>en</option><option>ja</option><option>ko</option></select></div>
       <div class="field-grid" id="cloud-translation-settings" data-cloud-only>
         <div class="field"><label>云端每批最大条数</label><input type="text" name="max_batch_size"></div>
@@ -896,7 +982,9 @@
 </div>
 
 <script src="i18n.js"></script>
+<script src="cloud_model_settings.js"></script>
 <script src="local_model_settings.js"></script>
+<script src="usage_statistics.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

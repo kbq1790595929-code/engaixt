@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from engines.base import TextItem
-from core.trial_quota import TrialQuotaExceeded, ensure_translation_quota_available
 from translators.base import TranslatorBase, retry_with_backoff
 from translators.cache import get_cache
 from config import get_config
@@ -70,7 +69,6 @@ class AnthropicTranslator(TranslatorBase):
                     prompt, placeholders = self.prepare_prompt(item.original, source_lang, target_lang)
 
                     async def call():
-                        ensure_translation_quota_available()
                         resp = await client.messages.create(
                             model=config.anthropic_model,
                             max_tokens=1024,
@@ -98,7 +96,6 @@ class AnthropicTranslator(TranslatorBase):
                         warning(f"[{item.original[:40]}...] 翻译校验失败，将错误反馈 AI 重试...")
                         feedback = self.prepare_retry_feedback(item.original, result, warns)
                         async def retry_call():
-                            ensure_translation_quota_available()
                             return await client.messages.create(
                                 model=config.anthropic_model,
                                 max_tokens=1024,
@@ -128,9 +125,6 @@ class AnthropicTranslator(TranslatorBase):
             except asyncio.CancelledError:
                 item.translated = item.original
                 raise
-            except TrialQuotaExceeded:
-                item.translated = item.original
-                raise
             except Exception as e:
                 warning(f"翻译失败 [{item.original[:30]}...]: {e}")
                 item.translated = item.original
@@ -147,8 +141,6 @@ class AnthropicTranslator(TranslatorBase):
         results = await asyncio.gather(*tasks, return_exceptions=True)
         valid = []
         for r in results:
-            if isinstance(r, TrialQuotaExceeded):
-                raise r
             if isinstance(r, BaseException):
                 continue
             if r is not None:

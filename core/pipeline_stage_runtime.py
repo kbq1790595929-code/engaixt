@@ -4,6 +4,7 @@ import fnmatch
 from pathlib import Path
 
 from core.engine_capabilities import can_extract
+from core.pipeline_detect_stage import record_final_extraction
 from core.manifest import GameManifest
 from core.preflight import run_preflight
 from utils.archive import extract_archive, find_game_root, is_archive
@@ -40,6 +41,35 @@ def run_detection_stage(pipeline, path: Path, injector: str | None):
 
     pipeline.manifest = GameManifest.for_game(path)
     pipeline.manifest.set_engine(engine)
+    try:
+        from core.game_identity import resolve_game_identity
+
+        identity = resolve_game_identity(path, manifest_data=pipeline.manifest.data)
+        pipeline.manifest.set_game_identity(identity.title, identity.source)
+        pipeline.diagnostics.set("game_identity", identity.to_dict())
+    except Exception as exc:
+        identity = None
+        pipeline.diagnostics.set("game_identity", {
+            "title": "",
+            "source": "identity_error",
+            "error": str(exc),
+        })
+    pipeline.diagnostics.set("engine", {
+        "name": getattr(engine, "name", ""),
+        "label": getattr(engine, "label", ""),
+    })
+    try:
+        from core.usage_statistics import update_usage_run
+
+        update_usage_run(
+            getattr(pipeline, "usage_run_id", ""),
+            engine=getattr(engine, "name", ""),
+            game_title=identity.title if identity else "",
+            title_source=identity.source if identity else "",
+            game_path=str(path.resolve()),
+        )
+    except Exception:
+        pass
 
     injector = pipeline._auto_select_injector(injector, engine, path)
     preflight = run_preflight(path, engine, injector)
@@ -108,6 +138,7 @@ def run_extract_stage(pipeline, path: Path, engine, file_filter: list[str] | Non
         info(f"文件过滤: {'/'.join(file_filter)} -> 选中 {len(items)}/{total_before} 条")
         pipeline.diagnostics.step("file_filter", selected=len(items), total=total_before, patterns=file_filter)
 
+    record_final_extraction(pipeline, engine, items)
     return engine, items, extracted_count
 
 

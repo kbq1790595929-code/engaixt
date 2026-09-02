@@ -19,7 +19,17 @@ def _get_cache():
 
 class DeepSeekRuntimeMixin:
     def _configured_concurrency(self, config) -> int:
-        return max(1, int(config.max_concurrency or 1))
+        configured = max(1, int(config.max_concurrency or 1))
+        # Respect the model's documented concurrency limit (e.g. deepseek-v4-pro
+        # caps at 500) so batch storms do not trip the official API rate limit.
+        try:
+            from translators.pricing import pricing_for
+            limit = pricing_for("deepseek", self._model(config)).concurrency_limit
+            if limit and int(limit) > 0:
+                configured = min(configured, int(limit))
+        except Exception:
+            pass
+        return max(1, configured)
 
     def _api_key(self, config) -> str:
         for field in self.API_KEY_FIELDS:

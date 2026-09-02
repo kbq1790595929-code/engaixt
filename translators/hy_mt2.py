@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 
 from config import get_config
@@ -13,10 +14,20 @@ from translators.hy_mt2_component import MODEL_NAME
 from translators.hy_mt2_models import resolve_model_name
 from translators.hy_mt2_quality import (
     finalize_local_translations,
+    local_translation_quality_issue,
     repair_translation_structure,
 )
+from translators.hy_mt2_json import (
+    parse_local_translation_map,
+    parse_partial_local_translation_map,
+)
 from translators.hy_mt2_runtime import HyMt2Runtime, get_runtime
-from utils.text_extract import protect_placeholders, translation_source_for_item
+from utils.text_extract import (
+    extract_placeholders,
+    protect_placeholders,
+    translation_source_for_item,
+    validation_source_for_item,
+)
 from utils.logger import info, warning
 
 
@@ -37,6 +48,11 @@ class HyMt2Translator(DeepSeekTranslator):
         self._speed_last_logged_at = 0.0
         self._speed_generated_tokens = 0
         self._speed_inference_seconds = 0.0
+        self._speed_last_instant = 0.0
+        self._speed_callback = None
+        self._speed_live_tokens = 0
+        self._speed_live_started_at = 0.0
+        self._speed_lock = threading.Lock()
 
     def _model(self, config=None) -> str:
         config = config or get_config()
@@ -238,6 +254,27 @@ class HyMt2Translator(DeepSeekTranslator):
         source_lang: str,
         target_lang: str,
         on_progress=None,
+        on_speed=None,
+    ) -> list[TextItem]:
+        self._speed_callback = on_speed
+        heartbeat = asyncio.create_task(self._speed_heartbeat()) if on_speed else None
+        try:
+            return await self._translate_batch_impl(items, source_lang, target_lang, on_progress)
+        finally:
+            if heartbeat:
+                heartbeat.cancel()
+                try:
+                    await heartbeat
+                except asyncio.CancelledError:
+                    pass
+            self._speed_callback = None
+
+    async def _translate_batch_impl(
+        self,
+        items: list[TextItem],
+        source_lang: str,
+        target_lang: str,
+        on_progress=None,
     ) -> list[TextItem]:
         if not items:
             return items
@@ -246,6 +283,9 @@ class HyMt2Translator(DeepSeekTranslator):
         self._speed_last_logged_at = 0.0
         self._speed_generated_tokens = 0
         self._speed_inference_seconds = 0.0
+        self._speed_last_instant = 0.0
+        self._speed_live_tokens = 0
+        self._speed_live_started_at = 0.0
         self.MAX_MESSAGE_BATCH = max(1, min(16, int(getattr(config, "hy_mt2_batch_size", 8) or 8)))
         self.MAX_BATCH_ITEMS = self.MAX_MESSAGE_BATCH
         started = time.perf_counter()
@@ -377,22 +417,64 @@ class HyMt2Translator(DeepSeekTranslator):
         self._record_batch_request(batch, cache)
         try:
             request_started = time.perf_counter()
-            completion = await asyncio.to_thread(self._runtime.complete, prompt, max_tokens)
+            self._begin_live_speed()
+            completion = await asyncio.to_thread(
+                self._complete_local_prompt,
+                prompt,
+                max_tokens,
+            )
             request_elapsed = time.perf_counter() - request_started
+            live_tokens = self._finish_live_speed()
+            completion_tokens = int(completion.completion_tokens or live_tokens)
             self._record_speed(
-                completion.completion_tokens,
+                completion_tokens,
                 completion.elapsed_seconds or request_elapsed,
             )
             cache.record_api_call(
                 prompt,
                 completion.content,
-                _Usage(completion.prompt_tokens, completion.completion_tokens),
+                _Usage(completion.prompt_tokens, completion_tokens),
                 provider=self.name,
                 model=self._model(),
             )
+            if str(getattr(completion, "finish_reason", "") or "").lower() in {
+                "length",
+                "max_tokens",
+            }:
+                cache.stats.local_truncation_count += 1
+                raise BatchJsonParseError(
+                    "local response reached max_tokens; retry with a smaller batch"
+                )
             mapping = self._parse_local_json(completion.content, expected_keys)
         except (BatchJsonParseError, BatchShapeError) as exc:
             cache.stats.json_parse_fail_count += 1
+            partial = parse_partial_local_translation_map(completion.content, expected_keys)
+            truncated = str(getattr(completion, "finish_reason", "") or "").lower() in {
+                "length",
+                "max_tokens",
+            }
+            if partial and not truncated:
+                cache.stats.partial_batch_recovered_count += 1
+                cache.stats.partial_batch_recovered_item_count += len(partial)
+                invalid = self._apply_local_mapping(
+                    batch.items,
+                    partial,
+                    source_lang,
+                    target_lang,
+                )
+                warning(
+                    f"Hy-MT2 本地 JSON 不完整，已安全回收 {len(partial)}/{len(batch.items)} 条，"
+                    f"只重试剩余 {len(invalid)} 条"
+                )
+                if invalid:
+                    cache.stats.batch_retry_count += 1
+                    await self._translate_local_batch(
+                        _Batch(invalid, batch.text_type, batch.complex),
+                        source_lang,
+                        target_lang,
+                        depth=depth + 1,
+                    )
+                return
             if depth < 3:
                 cache.stats.batch_split_count += 1
                 if len(batch.items) > 1:
@@ -413,22 +495,12 @@ class HyMt2Translator(DeepSeekTranslator):
                 pending.item.translated = pending.item.original
             return
 
-        invalid = []
-        for row_id, pending in enumerate(batch.items, 1):
-            raw_candidate = repair_translation_structure(
-                pending.item.original,
-                mapping.get(row_id, ""),
-            )
-            candidate = self._validate_batch_translation(
-                pending.item,
-                raw_candidate,
-                source_lang,
-                target_lang,
-            )
-            if candidate:
-                self._store_success(pending.item, candidate, source_lang, target_lang)
-            else:
-                invalid.append(pending)
+        invalid = self._apply_local_mapping(
+            batch.items,
+            mapping,
+            source_lang,
+            target_lang,
+        )
 
         if invalid and depth < 2:
             if depth == 0:
@@ -450,6 +522,28 @@ class HyMt2Translator(DeepSeekTranslator):
             for pending in invalid:
                 pending.item.translated = pending.item.original
 
+    def _complete_local_prompt(self, prompt: str, max_tokens: int):
+        complete_with_progress = getattr(self._runtime, "complete_with_progress", None)
+        if callable(complete_with_progress):
+            return complete_with_progress(prompt, max_tokens, self._on_stream_chunk)
+        return self._runtime.complete(prompt, max_tokens)
+
+    def _begin_live_speed(self) -> None:
+        with self._speed_lock:
+            self._speed_live_tokens = 0
+            self._speed_live_started_at = time.perf_counter()
+
+    def _on_stream_chunk(self, count: int = 1) -> None:
+        with self._speed_lock:
+            self._speed_live_tokens += max(0, int(count or 0))
+
+    def _finish_live_speed(self) -> int:
+        with self._speed_lock:
+            count = self._speed_live_tokens
+            self._speed_live_tokens = 0
+            self._speed_live_started_at = 0.0
+            return count
+
     def _record_speed(self, generated_tokens: int, elapsed_seconds: float) -> None:
         generated = max(0, int(generated_tokens or 0))
         self._speed_generated_tokens += generated
@@ -457,16 +551,55 @@ class HyMt2Translator(DeepSeekTranslator):
         now = time.perf_counter()
         if not self._speed_started_at:
             self._speed_started_at = now - max(0.0, elapsed_seconds)
+        self._speed_last_instant = generated / max(0.001, elapsed_seconds)
+        self._emit_speed(instant=self._speed_last_instant)
         if not self._speed_last_logged_at or now - self._speed_last_logged_at >= 2.0:
-            instant = generated / max(0.001, elapsed_seconds)
-            self._log_speed(instant=instant)
+            self._log_speed(instant=self._speed_last_instant)
             self._speed_last_logged_at = now
+
+    async def _speed_heartbeat(self) -> None:
+        while True:
+            await asyncio.sleep(1.0)
+            self._emit_speed()
+
+    def _emit_speed(self, *, instant: float | None = None, final: bool = False) -> None:
+        callback = self._speed_callback
+        if callback is None:
+            return
+        if not self._speed_started_at:
+            return
+        with self._speed_lock:
+            live_tokens = self._speed_live_tokens
+            live_started_at = self._speed_live_started_at
+        live_elapsed = max(0.0, time.perf_counter() - live_started_at) if live_started_at else 0.0
+        visible_tokens = self._speed_generated_tokens + live_tokens
+        visible_seconds = self._speed_inference_seconds + live_elapsed
+        average = visible_tokens / max(0.001, visible_seconds)
+        live_current = live_tokens / max(0.001, live_elapsed) if live_started_at else 0.0
+        current = live_current if live_started_at and live_tokens else self._speed_last_instant
+        if instant is not None:
+            current = float(instant)
+        payload = {
+            "provider": self.name,
+            "model": self._model(),
+            "current_tps": round(max(0.0, current), 1),
+            "average_tps": round(max(0.0, average), 1),
+            "generated_tokens": visible_tokens,
+            "backend": str(getattr(self._runtime, "active_backend", "") or "unknown"),
+            "streaming": bool(live_started_at),
+            "final": bool(final),
+        }
+        try:
+            callback(payload)
+        except Exception:
+            pass
 
     def _log_speed(self, *, instant: float | None = None, final: bool = False) -> None:
         if not self._speed_generated_tokens or not self._speed_started_at:
             return
         average = self._speed_generated_tokens / max(0.001, self._speed_inference_seconds)
         if final:
+            self._emit_speed(instant=instant, final=True)
             info(
                 f"Hy-MT2 平均速度: {average:.1f} tokens/s，"
                 f"累计生成 {self._speed_generated_tokens} tokens"
@@ -512,25 +645,73 @@ class HyMt2Translator(DeepSeekTranslator):
 
     @staticmethod
     def _parse_local_json(raw: str, expected_keys: list[str]) -> dict[int, str]:
-        text = str(raw or "").strip()
-        if text.startswith("```"):
-            raise BatchJsonParseError("response contains markdown fence")
-        start = text.find("{")
-        end = text.rfind("}")
-        if start < 0 or end < start:
-            raise BatchJsonParseError("response does not contain json object")
-        try:
-            payload = json.loads(text[start:end + 1])
-        except json.JSONDecodeError as exc:
-            raise BatchJsonParseError(f"invalid json: {exc}") from exc
-        if not isinstance(payload, dict) or list(payload) != expected_keys:
-            raise BatchShapeError("id set mismatch")
-        result: dict[int, str] = {}
-        for key, value in payload.items():
-            if not isinstance(value, str):
-                raise BatchShapeError("translation is not string")
-            result[int(key.split(":", 1)[0])] = value.strip()
-        return result
+        return parse_local_translation_map(raw, expected_keys)
+
+    def _apply_local_mapping(
+        self,
+        pending_items: list,
+        mapping: dict[int, str],
+        source_lang: str,
+        target_lang: str,
+    ) -> list:
+        """Apply explicit response IDs and return only items needing retry."""
+        invalid = []
+        for row_id, pending in enumerate(pending_items, 1):
+            raw_candidate = repair_translation_structure(
+                pending.item.original,
+                mapping.get(row_id, ""),
+            )
+            candidate = self._validate_batch_translation(
+                pending.item,
+                raw_candidate,
+                source_lang,
+                target_lang,
+            )
+            if candidate:
+                self._store_success(pending.item, candidate, source_lang, target_lang)
+            else:
+                invalid.append(pending)
+        return invalid
+
+    def _validate_batch_translation(
+        self,
+        item: TextItem,
+        translated: str,
+        source_lang: str = "",
+        target_lang: str = "",
+    ) -> str | None:
+        """Add strict local-only control and collapse checks after shared validation."""
+        candidate = super()._validate_batch_translation(
+            item,
+            translated,
+            source_lang,
+            target_lang,
+        )
+        if candidate is None:
+            return None
+
+        source = validation_source_for_item(item)
+        expected_controls = extract_placeholders(source)
+        actual_controls = extract_placeholders(candidate)
+        if actual_controls != expected_controls:
+            get_cache().stats.local_control_fail_count += 1
+            warning(
+                f"Hy-MT2 本地译文控制符不完整或顺序改变，拒绝写入缓存："
+                f"期望 {len(expected_controls)} 个，实际 {len(actual_controls)} 个"
+            )
+            return None
+
+        issue = local_translation_quality_issue(
+            item,
+            candidate,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        if issue:
+            get_cache().stats.local_quality_fail_count += 1
+            warning(f"Hy-MT2 本地译文质量门禁：{issue}，拒绝写入缓存")
+            return None
+        return candidate
 
     @staticmethod
     def _restore_line_dialogue_wrappers(source: str, translated: str) -> str:

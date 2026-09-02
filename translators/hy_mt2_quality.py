@@ -4,6 +4,7 @@ import re
 from collections import Counter, defaultdict
 
 from engines.base import TextItem
+from utils.text_extract import extract_placeholders, is_punctuation_only, validation_source_for_item
 
 
 _DIALOGUE_PAIRS = {"「": "」", "『": "』"}
@@ -109,6 +110,52 @@ def finalize_local_translations(items: list[TextItem]) -> tuple[int, int, int]:
             structure_fixed += 1
     speaker_fixed, inconsistent_groups = normalize_speaker_names(items)
     return structure_fixed, speaker_fixed, inconsistent_groups
+
+
+def local_translation_quality_issue(
+    item: TextItem,
+    translated: str,
+    *,
+    source_lang: str = "ja",
+    target_lang: str = "zh-CN",
+) -> str | None:
+    """Reject obvious local-model collapse before it reaches the cache.
+
+    This is deliberately conservative and local-only. It does not attempt to
+    judge literary quality; it catches results such as a long dialogue becoming
+    one punctuation mark or one sentence-final particle. Names are exempt from
+    the length-ratio rule because transliteration can legitimately be shorter.
+    """
+    if not str(target_lang or "").lower().startswith("zh"):
+        return None
+    source = validation_source_for_item(item)
+    source_visible = _visible_content(source)
+    translated_visible = _visible_content(translated)
+    if not source_visible or is_punctuation_only(source):
+        return None
+    if not translated_visible:
+        return "译文为空或只剩控制符"
+    if is_punctuation_only(translated) and not is_punctuation_only(source):
+        return "译文塌缩为纯标点"
+
+    raw_kind = str((getattr(item, "meta", {}) or {}).get("kind") or getattr(item, "context", "") or "").lower()
+    is_name = raw_kind in {"name", "speaker", "character"} or "name" in raw_kind or "speaker" in raw_kind
+    if is_name:
+        return None
+
+    source_len = len(source_visible)
+    translated_len = len(translated_visible)
+    if source_len >= 8 and translated_len < max(2, int(source_len * 0.22 + 0.5)):
+        return f"译文长度异常收缩 {source_len}->{translated_len}"
+    return None
+
+
+def _visible_content(text: str) -> str:
+    visible = re.sub(r"\s+", "", str(text or ""))
+    placeholders = extract_placeholders(visible)
+    for token in placeholders:
+        visible = visible.replace(token, "")
+    return visible
 
 
 def _dialogue_body(source: str, translated: str) -> tuple[str, str, str]:

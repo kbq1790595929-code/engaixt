@@ -6,6 +6,42 @@
     } else if (key === "file_count") {
         document.getElementById("stat-file-count").textContent = val;
         document.getElementById("stat-files").hidden = false;
+    } else if (key === "extraction_stats") {
+        const stats = (val && typeof val === "object") ? val : {};
+        window._engaixtExtractionStats = {
+            text_count: Number(stats.text_count || 0),
+            source_chars: Number(stats.source_chars || 0),
+            file_count: Number(stats.file_count || 0),
+            path: String(stats.path || "")
+        };
+        const count = document.getElementById("stat-text-count");
+        const files = document.getElementById("stat-file-count");
+        const fileStat = document.getElementById("stat-files");
+        if (count) count.textContent = window._engaixtExtractionStats.text_count.toLocaleString();
+        if (files) files.textContent = window._engaixtExtractionStats.file_count.toLocaleString();
+        if (fileStat) fileStat.hidden = false;
+        const selectedPath = document.getElementById("path-input")?.value || "";
+        if (!stats.path || selectedPath === stats.path) {
+            if (typeof refreshMainCostEstimate === "function") {
+                refreshMainCostEstimate(selectedPath, stats.text_count, stats.source_chars);
+            }
+        }
+        showStats();
+    } else if (key === "local_speed") {
+        const speed = (val && typeof val === "object") ? Number(val.current_tps) : 0;
+        const speedEl = document.getElementById("local-speed");
+        if (speedEl && Number.isFinite(speed) && speed > 0) {
+            speedEl.textContent = `${speed.toFixed(1)} tokens/s`;
+            speedEl.hidden = false;
+        }
+    } else if (key === "preflight_result") {
+        const result = (val && typeof val === "object") ? val : {};
+        const selectedPath = document.getElementById("path-input")?.value || "";
+        if (!result.path || selectedPath === result.path) {
+            if (result.status === "success" || result.status === "skipped" || result.status === "failed") {
+                enableButtons(true);
+            }
+        }
     } else if (key === "translate_progress") {
         const current = Number(val && val.current);
         const total = Number(val && val.total);
@@ -21,6 +57,15 @@
 }
 
 let _taskProgressGuards = {};
+window._engaixtExtractionStats = null;
+
+function hideLocalSpeed() {
+    const speedEl = document.getElementById("local-speed");
+    if (speedEl) {
+        speedEl.hidden = true;
+        speedEl.textContent = "";
+    }
+}
 
 function _resetTaskProgressGuards() {
     _taskProgressGuards = {};
@@ -89,7 +134,8 @@ function on_progress(step, pct, detail) {
     }
     if (pctEl) pctEl.textContent = detailText || (Math.round(pct) + "%");
     // 100% 到达时更新状态 + 清理
-    if (pct >= 100) {
+    if (pct >= 100 && !String(step || "").includes("preflight")) {
+        hideLocalSpeed();
         const dot = document.getElementById("status-dot");
         dot.className = "dot idle";
         const statusText = document.getElementById("status-text");
@@ -98,6 +144,7 @@ function on_progress(step, pct, detail) {
         document.querySelector(".progress-bar").classList.remove("running");
         enableButtons(true);
         setTimeout(hideStats, 2000);
+        if (_isStatisticsPageActive()) loadUsageStatistics(true);
     }
 }
 
@@ -166,6 +213,8 @@ function clearLog() {
 function resetRun() {
     clearLog();
     _resetTaskProgressGuards();
+    window._engaixtExtractionStats = null;
+    hideLocalSpeed();
     document.getElementById("progress-fill").style.width = "0%";
     document.getElementById("progress-text").textContent = "0%";
     const stepEl = document.getElementById("status-step");
@@ -229,6 +278,8 @@ function shouldResolvePath(path) {
 // 重置 UI 到初始状态（保留日志）
 function resetUI() {
     _resetTaskProgressGuards();
+    window._engaixtExtractionStats = null;
+    hideLocalSpeed();
     document.getElementById("progress-fill").style.width = "0%";
     document.getElementById("progress-text").textContent = "0%";
     const statusStep = document.getElementById("status-step");
@@ -240,6 +291,8 @@ function resetUI() {
     document.getElementById("stat-trans-cur").textContent = "0";
     document.getElementById("stat-trans-total").textContent = "0";
     document.getElementById("stat-file-count").textContent = "0";
+    const costStat = document.getElementById("stat-cost-estimate");
+    if (costStat) costStat.hidden = true;
     document.getElementById("engine-banner").hidden = true;
     _engCache = {};
     enableButtons(true);
@@ -265,6 +318,7 @@ async function detectEngine(path) {
     if (_engCache[path]) {
         if (seq !== _engineDetectSeq || pathInput.value !== path) return;
         _showEngine(_engCache[path]);
+        schedulePreflightExtraction(path, _engCache[path]);
         return;
     }
     banner.hidden = true;
@@ -273,9 +327,37 @@ async function detectEngine(path) {
         _engCache[path] = info;
         if (seq !== _engineDetectSeq || pathInput.value !== path) return;
         _showEngine(info);
+        schedulePreflightExtraction(path, info);
     } catch (e) {
         if (seq !== _engineDetectSeq || pathInput.value !== path) return;
         banner.hidden = true;
+    }
+}
+
+let _preflightPath = "";
+
+function _shouldPreflightExtract(info) {
+    if (!info || !info.name || _isRealtimeOnlyEngine(info)) return false;
+    if (info.name === "unknown" || info.name === "error") return false;
+    const capabilities = info?.["capabilities"] || {};
+    return capabilities.extract !== false && capabilities.supports_extract !== false;
+}
+
+async function schedulePreflightExtraction(path, info) {
+    if (!_shouldPreflightExtract(info)) return;
+    if (!window.pywebview || !pywebview.api?.preflight_extract) return;
+    if (path !== pathInput.value) return;
+    _preflightPath = path;
+    hideLocalSpeed();
+    enableButtons(false);
+    pushLog("info", t("正在预检：解包并提取文本，暂不开始翻译"));
+    try {
+        await pywebview.api.preflight_extract(path, String(info.name || ""));
+    } catch (error) {
+        if (_preflightPath === path) {
+            enableButtons(true);
+            pushLog("error", t("预检提取失败: ") + ((error && error.message) || error));
+        }
     }
 }
 
@@ -383,156 +465,6 @@ function enableButtons(en) {
     document.querySelectorAll(".actions-btn").forEach(b => b.disabled = !en);
 }
 
-let _licenseStatus = null;
-
-function _formatCny(value) {
-    const num = Number(value || 0);
-    if (!Number.isFinite(num)) return "0.00";
-    return num.toFixed(2).replace(/\.00$/, "");
-}
-
-function _formatQuotaCny(value) {
-    const num = Number(value || 0);
-    if (!Number.isFinite(num) || num <= 0) return "0";
-    const digits = num < 0.01 ? 4 : 2;
-    return num.toFixed(digits).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function renderLicenseStatus(status) {
-    _licenseStatus = status || _licenseStatus;
-    const pill = document.getElementById("license-pill");
-    const text = document.getElementById("license-text");
-    if (!pill || !text) return;
-    const s = _licenseStatus || {};
-    updateLicenseActionButtons(s);
-    pill.classList.remove("loading", "pro", "unlimited", "trial", "exceeded", "error");
-    if (s.error || s.edition === "unknown") {
-        pill.classList.add("error");
-        text.textContent = t("读取额度失败");
-        pill.title = t("读取额度失败");
-        return;
-    }
-    if (s.license_online_required) {
-        pill.classList.add("error");
-        text.textContent = t("Pro 版需要联网激活");
-        pill.title = s.license_error || t("联网校验失败");
-        return;
-    }
-    if (s.edition === "unlimited" || s.edition === "pro") {
-        pill.classList.add("unlimited");
-        const expires = s.license_expires_at ? String(s.license_expires_at).slice(0, 10) : "";
-        text.textContent = expires ? `${t("无额度版")} · ${t("有效期至")} ${expires}` : t("无额度版");
-        pill.title = text.textContent;
-        return;
-    }
-    const total = _formatQuotaCny(s.quota_cny_total == null ? 20 : s.quota_cny_total);
-    const used = _formatQuotaCny(s.quota_cny_used == null ? 0 : s.quota_cny_used);
-    const remaining = _formatQuotaCny(s.quota_cny_remaining == null ? 0 : s.quota_cny_remaining);
-    pill.classList.add(s.quota_exceeded ? "exceeded" : "trial");
-    const quotaLabel = s.quota_reset_policy === "monthly" ? t("本月试用额度") : t("试用额度");
-    text.textContent = `${quotaLabel} ¥${used} / ¥${total}`;
-    const resetNote = s.quota_resets_at
-        ? ` · ${t("下次重置")} ${String(s.quota_resets_at).slice(0, 10)}`
-        : "";
-    const expiredNote = s.license_expired && s.license_expires_at
-        ? ` · ${t("无额度版已到期")} ${String(s.license_expires_at).slice(0, 10)}`
-        : "";
-    pill.title = `${t("已用额度")} ¥${used} / ¥${total} · ${t("剩余额度")} ¥${remaining}${resetNote}${expiredNote}`;
-}
-
-function updateLicenseActionButtons(status) {
-    const upgrade = document.getElementById("upgrade-link");
-    const renew = document.getElementById("renew-link");
-    if (!upgrade || !renew) return;
-    const s = status || {};
-    const unknown = s.edition === "unknown" || !!s.error;
-    const shouldRenew = !unknown && (
-        s.edition === "unlimited"
-        || s.edition === "pro"
-        || !!s.license_expired
-        || !!s.license_online_required
-    );
-    upgrade.hidden = unknown || shouldRenew;
-    renew.hidden = unknown || !shouldRenew;
-}
-
-async function refreshLicenseStatus() {
-    const pill = document.getElementById("license-pill");
-    if (!window.pywebview || !pywebview.api || !pywebview.api.get_license_status) {
-        if (pill) pill.hidden = true;
-        return;
-    }
-    if (pill) pill.hidden = false;
-    try {
-        renderLicenseStatus(await pywebview.api.get_license_status());
-    } catch (e) {
-        renderLicenseStatus({ edition: "unknown", error: String(e || "") });
-    }
-}
-
-function openLicenseActivation() {
-    const overlay = document.getElementById("license-activation-overlay");
-    const input = document.getElementById("license-code-input");
-    const result = document.getElementById("license-activation-result");
-    if (!overlay || !input || !result) return;
-    result.hidden = true;
-    result.classList.remove("success", "error");
-    result.textContent = "";
-    overlay.classList.add("open");
-    window.setTimeout(() => input.focus(), 50);
-}
-
-function closeLicenseActivation() {
-    const overlay = document.getElementById("license-activation-overlay");
-    if (overlay) overlay.classList.remove("open");
-}
-
-async function pasteLicenseCode() {
-    const input = document.getElementById("license-code-input");
-    if (!input) return;
-    const text = await _readClipboardText();
-    if (text) input.value = text.trim();
-    input.focus();
-}
-
-function _showLicenseActivationResult(message, ok) {
-    const result = document.getElementById("license-activation-result");
-    if (!result) return;
-    result.hidden = false;
-    result.classList.toggle("success", !!ok);
-    result.classList.toggle("error", !ok);
-    result.textContent = String(message || "");
-}
-
-async function activateMonthlyMember() {
-    const input = document.getElementById("license-code-input");
-    const button = document.getElementById("license-activate-submit");
-    const code = String(input && input.value || "").trim();
-    if (!code) {
-        _showLicenseActivationResult(t("请输入会员激活码"), false);
-        if (input) input.focus();
-        return;
-    }
-    if (!window.pywebview || !pywebview.api || !pywebview.api.activate_monthly_member) {
-        _showLicenseActivationResult(t("当前版本不支持会员激活"), false);
-        return;
-    }
-    if (button) button.disabled = true;
-    try {
-        const response = await pywebview.api.activate_monthly_member(code);
-        const ok = !!(response && response.ok);
-        _showLicenseActivationResult(response && response.message || t("会员激活失败"), ok);
-        if (!ok) return;
-        if (response.status) renderLicenseStatus(response.status);
-        pushLog("info", response.message || t("会员激活成功"));
-        window.setTimeout(closeLicenseActivation, 1100);
-    } catch (e) {
-        _showLicenseActivationResult(`${t("会员激活失败")}: ${e && e.message ? e.message : e}`, false);
-    } finally {
-        if (button) button.disabled = false;
-    }
-}
-
 async function openSupportLink(key) {
     try {
         if (window.pywebview && pywebview.api && pywebview.api.open_support_link) {
@@ -541,8 +473,7 @@ async function openSupportLink(key) {
             const fallback = {
                 official: "https://engaixt.com/",
                 feedback: "mailto:contact@example.com?subject=EngAixt%20%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88",
-                upgrade: "https://ifdian.net/a/engaixt",
-                renew: "https://ifdian.net/a/engaixt",
+                sponsor: "https://ifdian.net/a/engaixt",
             }[key];
             if (fallback) window.open(fallback, "_blank", "noopener");
         }
@@ -562,22 +493,40 @@ async function _runAction(action, label) {
         return null;
     } finally {
         enableButtons(true);
-        refreshLicenseStatus();
     }
 }
 
 // ── 页面导航 ──
 
+let _activePage = "main";
+
 function navTo(page) {
-    if (page === "games") openTranslatedGames();
-    else closeTranslatedGames();
+    if (page === "games") {
+        closeStatistics();
+        openTranslatedGames();
+        _activePage = "games";
+        return;
+    }
+    if (page === "statistics") {
+        closeTranslatedGames(false);
+        openStatistics();
+        _activePage = "statistics";
+        return;
+    }
+    closeStatistics();
+    closeTranslatedGames(false);
+    document.getElementById("main-page").classList.add("active");
+    _setNavActive("main");
+    _activePage = "main";
 }
 
 function _setNavActive(page) {
     const navT = document.getElementById("nav-translate");
     const navG = document.getElementById("nav-games");
+    const navS = document.getElementById("nav-statistics");
     if (navT) navT.classList.toggle("active", page === "main");
     if (navG) navG.classList.toggle("active", page === "games");
+    if (navS) navS.classList.toggle("active", page === "statistics");
 }
 
 // ── 开始翻译 ──
@@ -909,10 +858,12 @@ async function loadSettings() {
     }
     resetSecretInputs();
     onTranslatorChanged(c.active_translator || "deepseek");
+    if (typeof refreshCloudModelState === "function") refreshCloudModelState();
 }
 
 function setFormControlValue(el, val) {
     if (!el) return;
+    if (typeof cloudDisplayModelValue === "function" && cloudDisplayModelValue(el, val)) return;
     if (el.type === "checkbox") {
         el.checked = !!val;
         return;
@@ -1168,7 +1119,6 @@ function renderAppUpdateInfo(info) {
     const versionBadge = document.getElementById("app-version-badge");
     const data = info || {};
     const version = data.version || "unknown";
-    const edition = data.edition || "trial";
     const latest = data.latest_version || "";
 
     if (versionBadge) versionBadge.textContent = version === "unknown" ? "v?" : `v${version}`;
@@ -1177,7 +1127,7 @@ function renderAppUpdateInfo(info) {
         nav.classList.toggle("update-available", !!(data.update_available && latest && !data.error));
         nav.title = data.update_available && latest
             ? `${t("当前版本")}：v${version} · ${t("最新版本")}：v${latest}`
-            : `${t("当前版本")}：v${version} · ${edition}`;
+            : `${t("当前版本")}：v${version}`;
     }
     if (badge) badge.hidden = !(data.update_available && latest && !data.error);
 
@@ -1203,7 +1153,7 @@ function renderAppUpdateInfo(info) {
     if (data.update_available && latest) {
         el.textContent = `${t("当前版本")}：v${version} · ${t("最新版本")}：v${latest}`;
     } else {
-        el.textContent = `${t("当前版本")}：v${version} · ${edition}`;
+        el.textContent = `${t("当前版本")}：v${version}`;
     }
 }
 
@@ -1496,6 +1446,7 @@ function _errorHtml(title, detail) {
 }
 
 async function openTranslatedGames() {
+    closeStatistics();
     document.getElementById("main-page").classList.remove("active");
     var page = document.getElementById("games-page");
     page.classList.add("active");
@@ -1542,7 +1493,7 @@ async function openTranslatedGames() {
     }
 }
 
-function closeTranslatedGames() {
+function closeTranslatedGames(returnToMain = true) {
     _cancelCoverLoads();
     _gameLibraryLoadSeq++;
     if (document.fullscreenElement) document.exitFullscreen();
@@ -1550,8 +1501,11 @@ function closeTranslatedGames() {
     page.classList.remove("active");
     _clearGridCardInteractions();
     _clearBackdrop();
-    document.getElementById("main-page").classList.add("active");
-    _setNavActive("main");
+    if (returnToMain) {
+        document.getElementById("main-page").classList.add("active");
+        _setNavActive("main");
+        _activePage = "main";
+    }
 }
 
 function _escapeHtml(value) {
@@ -1727,9 +1681,6 @@ function refreshLocalizedDynamicUi() {
     if (_engCache && pathInput && pathInput.value && _engCache[pathInput.value]) {
         _showEngine(_engCache[pathInput.value]);
     }
-    if (_licenseStatus) {
-        renderLicenseStatus(_licenseStatus);
-    }
     if (_allCarouselGames && _allCarouselGames.length) {
         _syncGameFilterOptions(_allCarouselGames);
         if (_isGamesPageActive()) applyGameLibraryFilters();
@@ -1740,6 +1691,7 @@ function refreshLocalizedDynamicUi() {
             if (track.dataset.messageKey === "empty") track.innerHTML = _centerMessageHtml(t("没有匹配的游戏。"));
         }
     }
+    if (_usageData && _isStatisticsPageActive()) renderUsageStatistics(_usageData);
 }
 window.refreshLocalizedDynamicUi = refreshLocalizedDynamicUi;
 
@@ -1986,8 +1938,6 @@ function _handleGameLibraryKeydown(event) {
 document.addEventListener("keydown", _handleGameLibraryKeydown);
 document.addEventListener("keydown", function(event) {
     if (event.key !== "Escape") return;
-    const license = document.getElementById("license-activation-overlay");
-    if (license && license.classList.contains("open")) closeLicenseActivation();
     const help = document.getElementById("help-overlay");
     if (help && help.classList.contains("open")) closeHelp();
 });
@@ -2033,27 +1983,11 @@ document.addEventListener("DOMContentLoaded", () => {
             await pywebview.api.save_config({ auto_launch: alCb.checked });
         });
     }
-    const licenseInput = document.getElementById("license-code-input");
-    if (licenseInput) {
-        licenseInput.addEventListener("keydown", event => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                activateMonthlyMember();
-            }
-        });
-    }
-    const licenseOverlay = document.getElementById("license-activation-overlay");
-    if (licenseOverlay) {
-        licenseOverlay.addEventListener("click", event => {
-            if (event.target === licenseOverlay) closeLicenseActivation();
-        });
-    }
 });
 
 // pywebview API 就绪后再读配置
 window.addEventListener("pywebviewready", function () {
     loadAutoLaunch();
-    refreshLicenseStatus();
     refreshAppUpdateInfo();
     setInterval(refreshAppUpdateInfo, 4 * 60 * 60 * 1000);
     if (pywebview.api.start_background_tool_update_check) {
@@ -2065,4 +1999,5 @@ window.addEventListener("pywebviewready", function () {
         if (c && c.bg_color) setBgColor(c.bg_color);
         if (c && c.bg_image) { _bgImagePath = c.bg_image; applyBgImage(c.bg_image); }
     });
+    if (_isStatisticsPageActive()) loadUsageStatistics(true);
 });

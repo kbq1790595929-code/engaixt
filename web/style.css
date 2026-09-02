@@ -209,7 +209,6 @@ svg.ic {
     display: inline-flex; align-items: center; gap: 8px;
 }
 
-.license-pill,
 .help-trigger,
 .top-link-trigger {
     display: inline-flex; align-items: center; gap: 7px;
@@ -222,37 +221,6 @@ svg.ic {
     backdrop-filter: blur(18px);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
     transition: background .15s ease, color .15s ease, border-color .15s ease, transform .15s ease;
-}
-.license-pill {
-    cursor: default;
-    min-width: 154px;
-    justify-content: center;
-    color: var(--warn);
-    background: rgba(251, 191, 36, .08);
-    border-color: rgba(251, 191, 36, .22);
-}
-.license-pill.unlimited,
-.license-pill.pro {
-    min-width: 82px;
-    color: var(--success);
-    background: rgba(74, 222, 128, .08);
-    border-color: rgba(74, 222, 128, .22);
-}
-.license-pill.exceeded,
-.license-pill.error {
-    color: var(--error);
-    background: rgba(251, 113, 133, .08);
-    border-color: rgba(251, 113, 133, .24);
-}
-.license-pill.loading {
-    color: var(--text-dim);
-    background: rgba(255, 255, 255, .035);
-}
-.license-pill .ic { width: 14px; height: 14px; }
-.license-pill span {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 .support-actions {
     display: inline-flex; align-items: center; gap: 6px;
@@ -301,15 +269,6 @@ svg.ic {
     .top-actions {
         top: 14px; right: 14px;
         gap: 6px;
-    }
-    .license-pill {
-        min-width: 0;
-        max-width: 136px;
-        padding: 0 9px;
-    }
-    .license-pill.unlimited,
-    .license-pill.pro {
-        min-width: 0;
     }
     .help-trigger {
         width: 34px; padding: 0;
@@ -694,6 +653,13 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
     font-size: 11.5px; color: var(--text-dim);
 }
 .progress-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-label-group { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.local-speed {
+    flex: 0 0 auto;
+    color: var(--accent-lt, var(--accent));
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
 .progress-text {
     font-size: 12px; font-weight: 600; color: var(--text-hi);
     font-variant-numeric: tabular-nums;
@@ -709,6 +675,27 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
     animation: fade-up .22s ease both;
 }
 .stats-row[hidden] { display: none; }
+.cost-stat { color: var(--accent-lt, var(--accent)); }
+
+.cloud-model-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.cloud-model-toolbar .settings-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cloud-price-note {
+  min-height: 18px;
+  color: var(--text-secondary, #9aa1b2);
+}
+#active-cloud-model {
+  margin-top: 10px;
+}
 .stat { display: inline-flex; align-items: center; gap: 5px; }
 .stat .ic { width: 12px; height: 12px; opacity: .6; }
 .stat.dim { color: var(--text-dim); }
@@ -913,33 +900,6 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .field textarea:focus {
     border-color: rgb(var(--accent-lt-r) var(--accent-lt-g) var(--accent-lt-b) / .55);
     box-shadow: 0 0 0 3px rgb(var(--accent-r) var(--accent-g) var(--accent-b) / .16);
-}
-.license-activation-content { width: 520px; }
-.license-code-input {
-    min-height: 116px;
-    resize: vertical;
-    line-height: 1.55;
-    overflow-wrap: anywhere;
-}
-.license-activation-result {
-    min-height: 38px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, .04);
-    color: var(--text);
-    font-size: 12.5px;
-    line-height: 1.45;
-}
-.license-activation-result.success {
-    border-color: rgba(52, 211, 153, .42);
-    background: rgba(16, 185, 129, .10);
-    color: #a7f3d0;
-}
-.license-activation-result.error {
-    border-color: rgba(251, 113, 133, .45);
-    background: rgba(244, 63, 94, .10);
-    color: #fecdd3;
 }
 .secret-input {
     position: relative;

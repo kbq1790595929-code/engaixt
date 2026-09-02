@@ -577,37 +577,29 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
         cache = get_cache()
 
         async def call():
+            kwargs = {
+                "model": self._model(),
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "max_tokens": max_tokens,
+                "timeout": self.REQUEST_TIMEOUT_SECONDS,
+            }
+            extra_body = self._chat_extra_body()
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            self._record_first_api_request(cache)
             try:
-                from core.trial_quota import TrialQuotaExceeded, ensure_translation_quota_available
-
-                ensure_translation_quota_available()
-                kwargs = {
-                    "model": self._model(),
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0,
-                    "max_tokens": max_tokens,
-                    "timeout": self.REQUEST_TIMEOUT_SECONDS,
-                }
-                extra_body = self._chat_extra_body()
-                if extra_body:
-                    kwargs["extra_body"] = extra_body
-                if json_mode:
-                    kwargs["response_format"] = {"type": "json_object"}
-                self._record_first_api_request(cache)
-                try:
-                    resp = await client.chat.completions.create(**kwargs)
-                except Exception as e:
-                    if json_mode and self._should_retry_without_response_format(e):
-                        kwargs.pop("response_format", None)
-                        resp = await client.chat.completions.create(**kwargs)
-                    else:
-                        raise
-            except TrialQuotaExceeded:
-                raise
+                resp = await client.chat.completions.create(**kwargs)
             except Exception as e:
-                if self._is_fatal_api_error(e):
+                if json_mode and self._should_retry_without_response_format(e):
+                    kwargs.pop("response_format", None)
+                    resp = await client.chat.completions.create(**kwargs)
+                elif self._is_fatal_api_error(e):
                     raise _FatalApiError(self._summarize_fatal_api_error(e)) from e
-                raise
+                else:
+                    raise
             content = resp.choices[0].message.content.strip()
             cache.record_api_call(
                 prompt,

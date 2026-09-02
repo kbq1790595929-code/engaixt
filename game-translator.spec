@@ -14,6 +14,7 @@ hiddenimports = [
     'openai', 'numpy', 'requests', 'anthropic', 'lz4', 'py7zr',
     'tkinterdnd2', 'tkinter', 'Crypto', 'frida',
     'core.trial_quota', 'core.app_update',
+    'core.usage_statistics',
     'translators.deepseek', 'translators.domestic',
     'translators.openai', 'translators.anthropic',
     'translators.hy_mt2', 'translators.hy_mt2_component',

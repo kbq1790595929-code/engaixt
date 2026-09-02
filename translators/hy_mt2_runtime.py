@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from config import get_config
 from translators.hy_mt2_component import (
@@ -31,6 +32,7 @@ class LocalCompletion:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     elapsed_seconds: float = 0.0
+    finish_reason: str = ""
 
 
 class HyMt2Runtime:
@@ -55,16 +57,34 @@ class HyMt2Runtime:
         with self._lock:
             return self._active_model
 
-    def complete(self, prompt: str, max_tokens: int) -> LocalCompletion:
+    def complete(
+        self,
+        prompt: str,
+        max_tokens: int,
+        *,
+        on_token: Callable[[int], None] | None = None,
+    ) -> LocalCompletion:
         return self.complete_messages(
             [{"role": "user", "content": str(prompt or "")}],
             max_tokens,
+            on_token=on_token,
         )
+
+    def complete_with_progress(
+        self,
+        prompt: str,
+        max_tokens: int,
+        on_token: Callable[[int], None],
+    ) -> LocalCompletion:
+        """Complete a prompt while reporting provisional streamed deltas."""
+        return self.complete(prompt, max_tokens, on_token=on_token)
 
     def complete_messages(
         self,
         messages: list[dict[str, str]],
         max_tokens: int,
+        *,
+        on_token: Callable[[int], None] | None = None,
     ) -> LocalCompletion:
         normalized = [
             {
@@ -83,14 +103,14 @@ class HyMt2Runtime:
             try:
                 self.ensure_started()
                 try:
-                    return self._request(normalized, max_tokens)
+                    return self._request(normalized, max_tokens, on_token=on_token)
                 except Exception as exc:
                     if self.active_backend == "cpu":
                         raise
                     warning(f"Hy-MT2 {self.active_backend} 推理失败，回退 CPU: {exc}")
                     self.stop()
                     self._start_backend("cpu", selected_model_name())
-                    return self._request(normalized, max_tokens)
+                    return self._request(normalized, max_tokens, on_token=on_token)
             finally:
                 with self._lock:
                     self._inflight = max(0, self._inflight - 1)
@@ -243,8 +263,14 @@ class HyMt2Runtime:
         except Exception:
             return False
 
-    def _request(self, messages: list[dict[str, str]], max_tokens: int) -> LocalCompletion:
-        payload = json.dumps({
+    def _request(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        *,
+        on_token: Callable[[int], None] | None = None,
+    ) -> LocalCompletion:
+        payload_data = {
             "model": self.active_model or selected_model_name(),
             "messages": messages,
             "temperature": 0.2,
@@ -252,8 +278,11 @@ class HyMt2Runtime:
             "top_k": 20,
             "repeat_penalty": 1.05,
             "max_tokens": max(64, min(4096, int(max_tokens))),
-            "stream": False,
-        }, ensure_ascii=False).encode("utf-8")
+            "stream": bool(on_token),
+        }
+        if on_token:
+            payload_data["stream_options"] = {"include_usage": True}
+        payload = json.dumps(payload_data, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"http://127.0.0.1:{self._port}/v1/chat/completions",
             data=payload,
@@ -263,6 +292,8 @@ class HyMt2Runtime:
         started = time.perf_counter()
         try:
             with urllib.request.urlopen(request, timeout=1200) as response:
+                if on_token:
+                    return self._read_stream_response(response, started, on_token)
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")[:1000]
@@ -277,6 +308,60 @@ class HyMt2Runtime:
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
             elapsed_seconds=time.perf_counter() - started,
+            finish_reason=str(choices[0].get("finish_reason") or ""),
+        )
+
+    @staticmethod
+    def _read_stream_response(response, started: float, on_token: Callable[[int], None]) -> LocalCompletion:
+        """Read llama-server's OpenAI-compatible SSE response.
+
+        Streaming usage is optional across llama.cpp builds. The callback
+        receives one provisional unit per non-empty delta for live display;
+        the final usage count, when supplied, remains authoritative for the
+        completed batch.
+        """
+        parts: list[str] = []
+        prompt_tokens = 0
+        completion_tokens = 0
+        finish_reason = ""
+        for raw_line in iter(response.readline, b""):
+            if isinstance(raw_line, bytes):
+                line = raw_line.decode("utf-8", errors="replace").strip()
+            else:
+                line = str(raw_line).strip()
+            if not line or not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                data = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+            usage = data.get("usage") or {}
+            prompt_tokens = max(prompt_tokens, int(usage.get("prompt_tokens") or 0))
+            completion_tokens = max(completion_tokens, int(usage.get("completion_tokens") or 0))
+            for choice in data.get("choices") or []:
+                delta = choice.get("delta") or {}
+                content = delta.get("content")
+                if content is None:
+                    content = choice.get("text")
+                if content:
+                    parts.append(str(content))
+                    try:
+                        on_token(1)
+                    except Exception:
+                        pass
+                finish_reason = str(choice.get("finish_reason") or finish_reason)
+        content = "".join(parts).strip()
+        if not content:
+            raise RuntimeError("Hy-MT2 流式响应没有返回译文")
+        return LocalCompletion(
+            content=content,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            elapsed_seconds=time.perf_counter() - started,
+            finish_reason=finish_reason,
         )
 
     def _schedule_idle_stop(self) -> None:

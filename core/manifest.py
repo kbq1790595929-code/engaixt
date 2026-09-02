@@ -58,6 +58,8 @@ class GameManifest:
                     data.setdefault("modified_files", [])
                     data.setdefault("created_files", [])
                     data.setdefault("notes", [])
+                    data.setdefault("game_title", "")
+                    data.setdefault("title_source", "")
                     return data
                 except Exception:
                     pass
@@ -68,6 +70,8 @@ class GameManifest:
             "created_at": _now(),
             "updated_at": _now(),
             "engine": "",
+            "game_title": "",
+            "title_source": "",
             "modified_files": [],
             "created_files": [],
             "notes": [],
@@ -86,6 +90,11 @@ class GameManifest:
 
     def set_engine(self, engine: object):
         self.data["engine"] = getattr(engine, "name", str(engine))
+        self.save()
+
+    def set_game_identity(self, title: str, source: str):
+        self.data["game_title"] = str(title or "")
+        self.data["title_source"] = str(source or "")
         self.save()
 
     def backup_file(self, target: Path) -> Path | None:

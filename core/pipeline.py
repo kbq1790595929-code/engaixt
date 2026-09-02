@@ -53,6 +53,7 @@ from core.pipeline_checkpoint_stage import (  # noqa: F401 - re-export：兼容�
     _safe_workspace_child,
 )
 from core.pipeline_translate_stage import _get_translator  # noqa: F401 - re-export：兼容既有 import 与打桩
+from core.translator_callbacks import translate_batch_with_callbacks
 from core.pipeline_kirikiri_dump import (  # noqa: F401 - re-export：兼容既有 import 与 monkeypatch 路径
     _KIRIKIRI_SCN_REF_CACHE,
     _KIRIKIRI_SCN_REF_INDEX_CACHE,
@@ -277,12 +278,6 @@ class Pipeline:
 
     def _record_api_cache_stats(self, game_path: Path, total_texts: int):
         return pipeline_translate_stage.record_api_cache_stats(self, game_path, total_texts)
-
-    def _trial_quota_status_dict(self, game_path: Path | None = None) -> dict | None:
-        return pipeline_translate_stage.trial_quota_status_dict(self, game_path)
-
-    def _ensure_translation_quota_or_raise(self, game_path: Path | None = None) -> None:
-        return pipeline_translate_stage.ensure_translation_quota_or_raise(self, game_path)
 
     def _checkpoint_resume_candidate(self, game_path: Path, file_filter: list[str] | None = None) -> Path | None:
         return pipeline_checkpoint_stage.checkpoint_resume_candidate(self, game_path, file_filter)
@@ -845,15 +840,12 @@ class Pipeline:
             if skip_ai_tail:
                 info("AI 翻译阶段已跳过少量尾巴文本")
             elif translator:
-                if any(not _has_effective_translation(it) for it in items):
-                    from translators.factory import translator_uses_trial_quota
-
-                    if translator_uses_trial_quota(config.active_translator):
-                        self._ensure_translation_quota_or_raise(path)
                 self._reset_api_cache_stats(config.active_translator)
-                items = await translator.translate_batch(
+                items = await translate_batch_with_callbacks(
+                    translator,
                     items, source_lang, target_lang,
                     on_progress=self._update_item_progress,
+                    on_speed=lambda data: self._meta("local_speed", data),
                 )
                 self._record_api_cache_stats(path, len(items))
                 # Step 5.5: 保存到 SQLite 缓存
@@ -1042,7 +1034,6 @@ class Pipeline:
             raw_by_key[(item.file, item.key, item.original)] = raw
 
         self._update_progress("polish", 45)
-        self._ensure_translation_quota_or_raise(path)
         result = await DeepSeekPolisher().polish_items(
             items,
             budget_cny=budget_cny,

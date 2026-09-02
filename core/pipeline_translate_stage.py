@@ -10,6 +10,7 @@ from pathlib import Path
 
 from config import get_config
 from core.translation_cache_db import load_translations_from_cache
+from core.translator_callbacks import translate_batch_with_callbacks
 from translators.cache import get_cache_stats, reset_cache_stats
 from utils.logger import info, warning
 
@@ -120,6 +121,7 @@ def reset_api_cache_stats(pipeline, translator_name: str):
         provider=translator_name or "unknown",
         model=model,
         prompt_version=prompt_version,
+        run_id=getattr(pipeline, "usage_run_id", ""),
     )
 
 def record_api_cache_stats(pipeline, game_path: Path, total_texts: int):
@@ -128,9 +130,6 @@ def record_api_cache_stats(pipeline, game_path: Path, total_texts: int):
 
     stats = get_cache_stats()
     stats["total_texts"] = int(total_texts)
-    quota = pipeline._trial_quota_status_dict(game_path)
-    if quota:
-        stats["trial_quota"] = quota
     if pipeline.diagnostics:
         pipeline.diagnostics.set("api_cache_stats", stats)
     try:
@@ -160,51 +159,6 @@ def record_api_cache_stats(pipeline, game_path: Path, total_texts: int):
         f"估算费用 ¥{stats.get('estimated_cost_cny', 0)}，"
         f"估算节省 ¥{stats.get('estimated_saved_cost_cny', 0)}"
     )
-    if quota and quota.get("edition") == "trial":
-        info(
-            "本月试用额度: "
-            f"已用 ¥{quota.get('quota_cny_used', 0)} / "
-            f"总额 ¥{quota.get('quota_cny_total', 0)}，"
-            f"剩余 ¥{quota.get('quota_cny_remaining', 0)}"
-        )
-
-def trial_quota_status_dict(pipeline, game_path: Path | None = None) -> dict | None:
-    from core import pipeline as _pipeline_mod
-    import json as _json
-
-    try:
-        from core.trial_quota import trial_status
-
-        status = trial_status().to_dict()
-    except Exception:
-        return None
-    if pipeline.diagnostics:
-        pipeline.diagnostics.set("trial_quota", status)
-    if game_path is not None:
-        try:
-            out = _pipeline_mod._game_meta_path(game_path, "trial_quota.json")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(_json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as exc:
-            warning(f"试用额度状态写入失败: {exc}")
-    return status
-
-def ensure_translation_quota_or_raise(pipeline, game_path: Path | None = None) -> None:
-    try:
-        from core.trial_quota import TrialQuotaExceeded, ensure_translation_quota_available
-    except Exception:
-        return
-    try:
-        ensure_translation_quota_available()
-    except TrialQuotaExceeded as exc:
-        status = pipeline._trial_quota_status_dict(game_path)
-        if pipeline.diagnostics:
-            pipeline.diagnostics.error("20 元试用额度已用完", error=str(exc), trial_quota=status or {})
-            pipeline.diagnostics.finish(False)
-        warning(str(exc))
-        raise
-
-
 async def translate_with_checkpoint(pipeline, items: list, checkpoint: Path,
                                     source_lang: str, target_lang: str,
                                     game_path: Path | None = None) -> list:
@@ -241,15 +195,12 @@ async def translate_with_checkpoint(pipeline, items: list, checkpoint: Path,
 
     info(f"待翻译: {len(untranslated)}/{len(items)} 条")
 
-    from translators.factory import translator_uses_trial_quota
-
-    if translator_uses_trial_quota(get_config().active_translator):
-        pipeline._ensure_translation_quota_or_raise(game_path)
-
     # 使用现有的稳定翻译器
-    translated = await translator.translate_batch(
+    translated = await translate_batch_with_callbacks(
+        translator,
         untranslated, source_lang, target_lang,
         on_progress=pipeline._update_item_progress,
+        on_speed=lambda data: pipeline._meta("local_speed", data),
     )
 
     # 保存到 SQLite 缓存
@@ -311,16 +262,14 @@ async def retry_invalid_translations(pipeline, items: list, checkpoint: Path,
             "small_tail_enabled": retry_small_tail,
             "coverage_before": round(coverage, 6),
         })
-    from translators.factory import translator_uses_trial_quota
-
-    if translator_uses_trial_quota(get_config().active_translator):
-        pipeline._ensure_translation_quota_or_raise(game_path)
     for it in invalid:
         it.translated = ""
 
-    retried = await translator.translate_batch(
+    retried = await translate_batch_with_callbacks(
+        translator,
         invalid, source_lang, target_lang,
         on_progress=pipeline._update_item_progress,
+        on_speed=lambda data: pipeline._meta("local_speed", data),
     )
     if game_path:
         _pipeline_mod.save_translations_to_cache(game_path, retried)
