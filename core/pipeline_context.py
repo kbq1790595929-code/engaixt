@@ -28,6 +28,44 @@ def begin_run_context(pipeline, input_path: str, path: Path, mode: dict):
     pipeline.diagnostics.set("stage_plan", stage_plan())
     pipeline.diagnostics.set("app_runtime", _app_runtime_snapshot())
     pipeline.diagnostics.set("config_snapshot", _config_snapshot(config))
+    provider = str(getattr(config, "active_translator", "") or "")
+    try:
+        from translators.factory import translator_model, translator_prompt_version
+
+        model = translator_model(provider, config)
+        prompt_version = translator_prompt_version(provider)
+    except Exception:
+        model = "unknown"
+        prompt_version = "legacy_v1"
+    try:
+        from core.usage_statistics import start_usage_run
+        from core.game_identity import resolve_game_identity
+
+        identity = resolve_game_identity(path)
+        pipeline.diagnostics.set("game_identity", identity.to_dict())
+        if mode.get("extract_only"):
+            run_mode = "extract"
+        elif mode.get("patch_only"):
+            run_mode = "patch"
+        elif mode.get("polish"):
+            run_mode = "polish"
+        elif mode.get("checkpoint"):
+            run_mode = "checkpoint"
+        else:
+            run_mode = "translate"
+        pipeline.usage_run_id = start_usage_run(
+            game_title=identity.title,
+            title_source=identity.source,
+            game_path=str(path.resolve()),
+            mode=run_mode,
+            provider=provider,
+            model=model,
+            prompt_version=prompt_version,
+        )
+        pipeline.diagnostics.set("usage_run_id", pipeline.usage_run_id)
+    except Exception as exc:
+        pipeline.usage_run_id = ""
+        pipeline.diagnostics.warn("使用统计初始化失败，翻译流程继续", error=str(exc))
     pipeline._blocked_count = 0
     return config
 
@@ -85,7 +123,6 @@ def _current_app_info_safe() -> dict[str, Any]:
         return {
             "app": "EngAixt",
             "version": "unknown",
-            "edition": "unknown",
             "can_apply_update": False,
             "install_dir": "",
             "error": str(exc),

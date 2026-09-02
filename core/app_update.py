@@ -45,12 +45,10 @@ class AppUpdateError(RuntimeError):
 
 
 def current_app_info() -> dict[str, Any]:
-    edition = _current_update_edition()
     version = _current_app_version()
     return {
         "app": APP_NAME,
         "version": version,
-        "edition": edition,
         "can_apply_update": _is_packaged_app(),
         "install_dir": str(_install_dir()),
     }
@@ -59,7 +57,7 @@ def current_app_info() -> dict[str, Any]:
 def check_update(*, timeout: int = 45) -> dict[str, Any]:
     info = current_app_info()
     current_version = str(info.get("version") or APP_VERSION)
-    url = _update_manifest_url(info["edition"])
+    url = _update_manifest_url()
     try:
         manifest = _read_json_url(url, timeout=timeout)
     except urllib.error.HTTPError as exc:
@@ -336,21 +334,9 @@ def is_newer_version(latest: str, current: str) -> bool:
     return _version_tuple(latest) > _version_tuple(current)
 
 
-def _current_update_edition() -> str:
-    try:
-        from core.trial_quota import current_edition
-
-        edition = str(current_edition() or "trial").strip().lower()
-    except Exception:
-        edition = "trial"
-    if edition in {"pro", "unlimited"}:
-        return "unlimited"
-    return "trial"
-
-
-def _update_manifest_url(edition: str) -> str:
-    # All editions share the same binaries. Membership is stored separately as
-    # a signed local license and survives in-place updates.
+def _update_manifest_url() -> str:
+    # Keep the established public path for deployment compatibility. There is
+    # now one package and one update stream; no edition is consulted.
     return f"{UPDATE_BASE_URL}/trial/latest.json"
 
 

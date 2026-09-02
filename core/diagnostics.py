@@ -144,6 +144,12 @@ class Diagnostics:
         self.data["success"] = bool(success)
         self.data["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         self.save()
+        try:
+            from core.usage_statistics import finish_usage_run
+
+            finish_usage_run(self.data.get("usage_run_id", ""), self.data)
+        except Exception as exc:
+            warning(f"使用统计收尾失败，已保留诊断报告: {exc}")
         latest = self.workspace.parent / "latest_diagnostics.json"
         latest.write_text(
             json.dumps(self.data, indent=2, ensure_ascii=False),

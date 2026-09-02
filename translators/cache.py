@@ -25,6 +25,14 @@ DEEPSEEK_V4_FLASH_INPUT_CNY_PER_M = DEEPSEEK_V4_FLASH.input_cny_per_m
 DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_M = DEEPSEEK_V4_FLASH.output_cny_per_m
 
 
+def _usage_value(value: Any, key: str):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
 _SPACE_RE = re.compile(r"[ \t\f\v]+")
 _LINE_SPACE_RE = re.compile(r" *\n *")
 
@@ -79,11 +87,16 @@ class TranslationCacheStats:
     partial_batch_recovered_item_count: int = 0
     validation_fail_count: int = 0
     single_fallback_count: int = 0
+    local_quality_fail_count: int = 0
+    local_control_fail_count: int = 0
+    local_truncation_count: int = 0
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
     estimated_cost_cny: float = 0.0
     actual_input_tokens: int = 0
     actual_output_tokens: int = 0
+    actual_cache_hit_input_tokens: int = 0
+    actual_cache_miss_input_tokens: int = 0
     actual_cost_cny: float = 0.0
     estimated_saved_input_tokens: int = 0
     estimated_saved_output_tokens: int = 0
@@ -92,10 +105,12 @@ class TranslationCacheStats:
     model: str = DEFAULT_MODEL
     prompt_version: str = DEFAULT_PROMPT_VERSION
     cache_db: str = str(DB_PATH)
+    run_id: str = ""
     started_at: float = field(default_factory=time.time)
 
     def reset(self, provider: str = DEFAULT_PROVIDER, model: str = DEFAULT_MODEL,
-              prompt_version: str = DEFAULT_PROMPT_VERSION, cache_db: Path | str = DB_PATH):
+              prompt_version: str = DEFAULT_PROMPT_VERSION, cache_db: Path | str = DB_PATH,
+              run_id: str = ""):
         enabled, auto_cleanup, max_size_bytes = _cache_runtime_settings()
         self.cache_enabled = enabled
         self.cache_auto_cleanup = auto_cleanup
@@ -125,11 +140,16 @@ class TranslationCacheStats:
         self.partial_batch_recovered_item_count = 0
         self.validation_fail_count = 0
         self.single_fallback_count = 0
+        self.local_quality_fail_count = 0
+        self.local_control_fail_count = 0
+        self.local_truncation_count = 0
         self.estimated_input_tokens = 0
         self.estimated_output_tokens = 0
         self.estimated_cost_cny = 0.0
         self.actual_input_tokens = 0
         self.actual_output_tokens = 0
+        self.actual_cache_hit_input_tokens = 0
+        self.actual_cache_miss_input_tokens = 0
         self.actual_cost_cny = 0.0
         self.estimated_saved_input_tokens = 0
         self.estimated_saved_output_tokens = 0
@@ -138,6 +158,7 @@ class TranslationCacheStats:
         self.model = model
         self.prompt_version = prompt_version
         self.cache_db = str(cache_db)
+        self.run_id = str(run_id or "")
         self.started_at = time.time()
 
     def add_saved(self, input_tokens: int, output_tokens: int):
@@ -178,11 +199,16 @@ class TranslationCacheStats:
             "partial_batch_recovered_item_count": self.partial_batch_recovered_item_count,
             "validation_fail_count": self.validation_fail_count,
             "single_fallback_count": self.single_fallback_count,
+            "local_quality_fail_count": self.local_quality_fail_count,
+            "local_control_fail_count": self.local_control_fail_count,
+            "local_truncation_count": self.local_truncation_count,
             "estimated_input_tokens": self.estimated_input_tokens,
             "estimated_output_tokens": self.estimated_output_tokens,
             "estimated_cost_cny": self.estimated_cost_cny,
             "actual_input_tokens": self.actual_input_tokens,
             "actual_output_tokens": self.actual_output_tokens,
+            "actual_cache_hit_input_tokens": self.actual_cache_hit_input_tokens,
+            "actual_cache_miss_input_tokens": self.actual_cache_miss_input_tokens,
             "actual_cost_cny": self.actual_cost_cny,
             "estimated_saved_input_tokens": self.estimated_saved_input_tokens,
             "estimated_saved_output_tokens": self.estimated_saved_output_tokens,
@@ -191,6 +217,7 @@ class TranslationCacheStats:
             "model": self.model,
             "prompt_version": self.prompt_version,
             "cache_db": self.cache_db,
+            "run_id": self.run_id,
             "pricing": pricing_dict(self.provider, self.model),
             "elapsed_seconds": round(time.time() - self.started_at, 3),
         }
@@ -284,8 +311,14 @@ class TranslationCache:
         return "message"
 
     def reset_stats(self, provider: str = DEFAULT_PROVIDER, model: str = DEFAULT_MODEL,
-                    prompt_version: str = DEFAULT_PROMPT_VERSION):
-        self.stats.reset(provider=provider, model=model, prompt_version=prompt_version, cache_db=self.db_path)
+                    prompt_version: str = DEFAULT_PROMPT_VERSION, run_id: str = ""):
+        self.stats.reset(
+            provider=provider,
+            model=model,
+            prompt_version=prompt_version,
+            cache_db=self.db_path,
+            run_id=run_id,
+        )
 
     def stats_dict(self) -> dict[str, Any]:
         self._refresh_runtime_settings()
@@ -614,39 +647,39 @@ class TranslationCache:
                 completion_tokens = getattr(usage, "output_tokens", None)
             actual_input_delta = int(prompt_tokens) if prompt_tokens is not None else 0
             actual_output_delta = int(completion_tokens) if completion_tokens is not None else 0
+            cached_input = _usage_value(usage, "prompt_cache_hit_tokens")
+            if cached_input is None:
+                cached_input = _usage_value(usage, "cached_tokens")
+            if cached_input is None:
+                details = _usage_value(usage, "prompt_tokens_details")
+                if details is None:
+                    details = _usage_value(usage, "input_tokens_details")
+                cached_input = _usage_value(details, "cached_tokens")
+            cached_input_delta = max(
+                0,
+                min(actual_input_delta, int(cached_input or 0)),
+            )
+            uncached_input_delta = max(0, actual_input_delta - cached_input_delta)
             if prompt_tokens is not None:
                 self.stats.actual_input_tokens += actual_input_delta
             if completion_tokens is not None:
                 self.stats.actual_output_tokens += actual_output_delta
-            actual_delta = cost_cny(actual_input_delta, actual_output_delta, provider, model)
+            self.stats.actual_cache_hit_input_tokens += cached_input_delta
+            self.stats.actual_cache_miss_input_tokens += uncached_input_delta
+            actual_delta = cost_cny(
+                actual_input_delta,
+                actual_output_delta,
+                provider,
+                model,
+                cache_hit_input_tokens=cached_input_delta,
+                cache_miss_input_tokens=uncached_input_delta,
+            )
             self.stats.actual_cost_cny = round(
                 self.stats.actual_cost_cny + actual_delta,
                 6,
             )
-        if usage is not None and actual_delta > 0:
-            cost_delta = round(actual_delta, 6)
-            cost_basis = "actual"
-        else:
-            cost_delta = round(estimated_delta, 6)
-            cost_basis = "estimated"
-        if cost_delta > 0:
-            try:
-                from core.trial_quota import TrialQuotaExceeded, charge_translation_cost
-
-                charge_translation_cost(
-                    cost_delta,
-                    source="translation_api",
-                    details={
-                        "basis": cost_basis,
-                        "provider": provider,
-                        "model": model,
-                        "pricing": pricing_dict(provider, model),
-                    },
-                )
-            except TrialQuotaExceeded:
-                raise
-            except Exception:
-                pass
+        # Keep estimated/actual provider cost in cache stats. It is informational
+        # only and never deducts from a local balance or blocks an API request.
 
     def record_saved_request(self, original: str, translated: str, prompt: str | None = None):
         input_tokens = self.estimate_tokens(prompt if prompt is not None else original)
@@ -744,8 +777,13 @@ def get_cache() -> TranslationCache:
 
 
 def reset_cache_stats(provider: str = DEFAULT_PROVIDER, model: str = DEFAULT_MODEL,
-                      prompt_version: str = DEFAULT_PROMPT_VERSION):
-    get_cache().reset_stats(provider=provider, model=model, prompt_version=prompt_version)
+                      prompt_version: str = DEFAULT_PROMPT_VERSION, run_id: str = ""):
+    get_cache().reset_stats(
+        provider=provider,
+        model=model,
+        prompt_version=prompt_version,
+        run_id=run_id,
+    )
 
 
 def get_cache_stats() -> dict[str, Any]:

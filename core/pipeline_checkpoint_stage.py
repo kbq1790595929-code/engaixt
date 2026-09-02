@@ -102,6 +102,15 @@ def reuse_checkpoint_workspace_if_available(pipeline, checkpoint: Path) -> bool:
     if not pipeline.workspace:
         return False
     source_workspace = checkpoint.parent
+    try:
+        data = json.loads(checkpoint.read_text(encoding="utf-8-sig"))
+        recorded_workspace = str(data.get("workspace_root") or "").strip()
+        if recorded_workspace:
+            candidate = Path(recorded_workspace)
+            if candidate.is_dir():
+                source_workspace = candidate
+    except (OSError, ValueError, TypeError):
+        pass
     source_original = source_workspace / "original"
     if not source_original.is_dir():
         return False
@@ -270,6 +279,7 @@ def save_checkpoint_json(pipeline, items: list, game_path: Path,
         "pck_name": pck_name,
         "source_lang": source_lang,
         "target_lang": target_lang,
+        "workspace_root": str(pipeline.workspace.root.resolve()) if pipeline.workspace else "",
         "total": len(items),
         "translated_count": sum(1 for it in items if _pipeline_mod._has_effective_translation(it)),
         "translation_contracts": sorted({

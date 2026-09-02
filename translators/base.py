@@ -17,13 +17,6 @@ async def retry_with_backoff(fn, max_retries=3, base_delay=2.0):
         try:
             return await fn()
         except Exception as e:
-            try:
-                from core.trial_quota import TrialQuotaExceeded
-
-                if isinstance(e, TrialQuotaExceeded):
-                    raise
-            except ImportError:
-                pass
             msg = str(e).lower()
             is_rate_limit = any(k in msg for k in (
                 "rate", "limit", "429", "too many requests",

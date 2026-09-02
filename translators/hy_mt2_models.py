@@ -31,6 +31,19 @@ MODEL_SPECS: dict[str, HyMt2ModelSpec] = {
         license_url=f"{_MODELSCOPE_ROOT}/Hy-MT2-1.8B-GGUF/resolve/master/LICENSE.txt",
         description="约 1.1 GB，显存和内存占用低，适合实时翻译与轻量设备。",
     ),
+    "HY-MT2-7B-Q4_K_M": HyMt2ModelSpec(
+        name="HY-MT2-7B-Q4_K_M",
+        label="腾讯混元 Hy-MT2 7B（Q4 速度版）",
+        filename="Hy-MT2-7B-Q4_K_M.gguf",
+        size=4_624_648_896,
+        sha256="9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
+        source_url=(
+            f"{_MODELSCOPE_ROOT}/Hy-MT2-7B-GGUF/resolve/master/"
+            "Hy-MT2-7B-Q4_K_M.gguf"
+        ),
+        license_url=f"{_MODELSCOPE_ROOT}/Hy-MT2-7B-GGUF/resolve/master/LICENSE.txt",
+        description="约 4.3 GB，7B 质量与速度的平衡版本，推荐日常翻译使用。",
+    ),
     "HY-MT2-7B-Q8_0": HyMt2ModelSpec(
         name="HY-MT2-7B-Q8_0",
         label="腾讯混元 Hy-MT2 7B（高质量）",

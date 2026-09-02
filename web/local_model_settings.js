@@ -1,12 +1,10 @@
 function onTranslatorChanged(value) {
     const localSelected = value === "hy_mt2";
-    const cloudSettings = document.getElementById("cloud-translation-settings");
-    if (cloudSettings) {
-        cloudSettings.hidden = localSelected;
-        cloudSettings.querySelectorAll("input, select, button").forEach(control => {
-            control.disabled = localSelected;
-        });
+    if (typeof handleTranslatorCostEstimateChanged === "function") {
+        handleTranslatorCostEstimateChanged(value);
     }
+    // Keep cloud controls visible so users can configure them before switching
+    // back to a cloud translator. Local inference simply ignores these values.
     if (localSelected) refreshHyMt2Status();
 }
 

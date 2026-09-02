@@ -262,6 +262,25 @@ def record_extraction(pipeline, engine, items: list):
             "samples": samples,
         })
 
+
+def record_final_extraction(pipeline, engine, items: list):
+    """Publish the post-filter counts used by the GUI cost preflight."""
+    per_file = {str(item.file) for item in items if getattr(item, "file", "")}
+    source_chars = sum(len(str(getattr(item, "original", "") or "")) for item in items)
+    pipeline._meta("extraction_stats", {
+        "text_count": len(items),
+        "source_chars": source_chars,
+        "file_count": len(per_file),
+        "preflight_reused": False,
+    })
+    if pipeline.diagnostics:
+        pipeline.diagnostics.set("extraction_final", {
+            "engine": getattr(engine, "name", ""),
+            "text_count": len(items),
+            "source_chars": source_chars,
+            "file_count": len(per_file),
+        })
+
 def record_no_items(pipeline, engine, path: Path, injector: str | None):
     engine_name = getattr(engine, "name", "")
     suggestions = [
