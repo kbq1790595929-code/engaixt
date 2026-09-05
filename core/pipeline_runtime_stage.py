@@ -102,8 +102,6 @@ def enter_kirikiri_runtime_capture_mode(
             "启动汉化版后推进到剧情文本；关闭游戏后重新点击开始翻译，管线会合并捕获文本并离线补翻。"
         )
 
-    pipeline._disable_kirikiri_static_patch_artifacts_for_runtime(game_path, engine)
-
     launcher: Path | None = None
     if injector == "frida":
         info("KiriKiri 使用 Frida 捕获模式启动")
@@ -119,25 +117,21 @@ def enter_kirikiri_runtime_capture_mode(
             warning(message)
             if pipeline.diagnostics:
                 pipeline.diagnostics.warn(message)
-                pipeline.diagnostics.finish(False)
+                return pipeline._fail_stage_code(
+                    "runtime",
+                    "runtime_prepare_failed",
+                    detail="KRKR 原生 Hook 启动器创建失败",
+                    rollback=True,
+                    next_actions=("重新安装完整发布包，或点击改用实时翻译前先补齐运行时组件。",),
+                )
             return False
 
     pipeline._update_progress("runtime_capture", 90)
-    if launch:
-        pipeline._update_progress("launch", 95)
-        if injector == "frida":
-            launch_with_injector(game_path, injector, engine=engine, checkpoint=checkpoint)
-        else:
-            _launch_finished_game(game_path, engine, None, checkpoint)
-    else:
-        info("已生成 KiriKiri 运行时捕获启动器；本次不自动启动游戏")
+    # This compatibility helper is now preparation-only. Static failure must
+    # never consume quota or start a game behind the user's back.
+    info("已生成 KiriKiri 运行时捕获启动器；等待用户点击“改用实时翻译”")
 
     pipeline._write_completion_notice(game_path, engine, mode="KiriKiri 实时捕获/显示层")
-    if pipeline.diagnostics:
-        pipeline.diagnostics.finish(True)
-    pipeline._update_progress("complete", 100)
-    if pipeline.workspace and not get_config().keep_workspace:
-        pipeline.workspace.cleanup()
     return True
 
 def record_modified_outputs(pipeline, game_path: Path, items: list, engine):
@@ -255,8 +249,14 @@ def verify_repack_outputs(pipeline, game_path: Path, items: list, engine) -> dic
         game_dir = game_path if game_path.is_dir() else game_path.parent
         return engine.verify_repack(game_dir, translated, result)
 
-    if engine_name == "kirikiri" and bool(getattr(engine, "_runtime_resource_overlay", False)):
-        return pipeline._verify_kirikiri_runtime_overlay_outputs(game_path, translated, result)
+    if engine_name == "kirikiri":
+        from core.kirikiri_repack_verifier import verify_kirikiri_repack_outputs
+        return verify_kirikiri_repack_outputs(
+            game_path,
+            translated,
+            result,
+            runtime_resource_overlay=bool(getattr(engine, "_runtime_resource_overlay", False)),
+        )
 
     if engine_name in ("xunity_realtime", "godot_frida", "unity_arch000_lua"):
         result["note"] = "该引擎写入封包/运行时缓存，跳过通用文本验证"
@@ -303,55 +303,14 @@ def verify_repack_outputs(pipeline, game_path: Path, items: list, engine) -> dic
     return result
 
 def verify_kirikiri_runtime_overlay_outputs(pipeline, game_path: Path, translated: list, result: dict) -> dict:
-    game_dir = game_path if game_path.is_dir() else game_path.parent
-    meta_dir = game_dir / "_translation_meta"
-    patch_dir = meta_dir / "kirikiri_patch"
-    manifest = meta_dir / "kirikiri_patch_manifest.txt"
-    patch_xp3 = meta_dir / "kirikiri_patch.xp3"
+    from core.kirikiri_repack_verifier import verify_kirikiri_repack_outputs
 
-    files: dict[str, list] = {}
-    for item in translated:
-        files.setdefault(str(item.file).replace("\\", "/"), []).append(item)
-
-    checked = 0
-    hits = 0
-    for rel, file_items in list(files.items())[:80]:
-        candidates = [patch_dir / rel, patch_dir / Path(rel).name]
-        for target in candidates:
-            if not target.exists() or not target.is_file():
-                continue
-            try:
-                data = target.read_bytes()
-            except Exception:
-                continue
-            checked += 1
-            for item in file_items[:20]:
-                translated_text = str(item.translated or "")
-                if (
-                    translated_text
-                    and (
-                        translated_text.encode("utf-8", errors="ignore") in data
-                        or translated_text.encode("utf-16", errors="ignore") in data
-                        or translated_text.encode("utf-16le", errors="ignore") in data
-                    )
-                ):
-                    hits += 1
-            break
-
-    result.update({
-        "checked": patch_dir.is_dir() or patch_xp3.exists(),
-        "hits": hits,
-        "files_checked": checked,
-        "patch_dir": str(patch_dir) if patch_dir.is_dir() else "",
-        "patch_xp3": str(patch_xp3) if patch_xp3.exists() else "",
-        "manifest": str(manifest) if manifest.exists() else "",
-        "note": "KiriKiri runtime overlay resource verification",
-    })
-    if result["checked"] and hits == 0 and pipeline.diagnostics:
-        pipeline.diagnostics.warn("KiriKiri runtime overlay did not find translated text in loose patch resources")
-    if not result["checked"] and pipeline.diagnostics:
-        pipeline.diagnostics.warn("KiriKiri runtime overlay is missing _translation_meta/kirikiri_patch resources")
-    return result
+    return verify_kirikiri_repack_outputs(
+        game_path,
+        translated,
+        result,
+        runtime_resource_overlay=True,
+    )
 
 def verify_bgi_outputs(pipeline, game_path: Path, translated: list, engine, result: dict) -> dict:
     """Verify translated BGI strings in the active ARC files."""
@@ -695,11 +654,11 @@ def prepare_runtime_dependencies(pipeline, game_path: Path, engine) -> None:
         restored = pipeline._restore_godot_static_patch_artifacts_for_runtime(game_path)
         if restored and pipeline.diagnostics:
             pipeline.diagnostics.set("godot_static_patch_restored_for_runtime", restored)
-    if (
-        getattr(engine, "name", "") == "kirikiri"
-        and bool(getattr(engine, "_runtime_resource_overlay", False))
-    ):
-        pipeline._prepare_kirikiri_patch_bridge_tooling(game_path, engine)
+    if getattr(engine, "name", "") == "kirikiri":
+        if bool(getattr(engine, "_kirikiri_xp3pack_used", False)):
+            pipeline._prepare_kirikiri_unencrypted_version_bridge(game_path, engine)
+        elif bool(getattr(engine, "_runtime_resource_overlay", False)):
+            pipeline._prepare_kirikiri_patch_bridge_tooling(game_path, engine)
 
 def restore_godot_static_patch_artifacts_for_runtime(pipeline, game_path: Path) -> list[str]:
     """Restore .pre_tool PCK/EXE backups before using the Godot display hook."""
@@ -788,6 +747,44 @@ def prepare_kirikiri_patch_bridge_tooling(pipeline, game_path: Path, engine) -> 
             if value:
                 pipeline.manifest.record_created(Path(str(value)), kind="runtime", runtime_required=True)
 
+
+def prepare_kirikiri_unencrypted_version_bridge(pipeline, game_path: Path, engine) -> dict[str, object]:
+    """Install KirikiriTools' version.dll only when Xp3Pack was actually used."""
+    if getattr(engine, "name", "") != "kirikiri":
+        return {"ok": False, "status": "wrong_engine"}
+    game_dir = game_path if game_path.is_dir() else game_path.parent
+    target = game_dir / "version.dll"
+    result: dict[str, object] = {
+        "ok": False,
+        "status": "missing",
+        "target": str(target),
+        "source": "",
+    }
+    try:
+        from core.tool_manager import find_tool
+        source = find_tool("kirikiri_unencrypted_version")
+    except Exception:
+        source = None
+    if target.exists():
+        result.update({"ok": True, "status": "existing_game_bridge"})
+        info("KiriKiri 已存在 version.dll，保留现有桥接文件")
+    elif source and source.is_file():
+        try:
+            shutil.copy2(source, target)
+            result.update({"ok": True, "status": "installed", "source": str(source)})
+            info("KirikiriTools version.dll 已部署，用于加载 Xp3Pack 补丁")
+            if pipeline.manifest:
+                pipeline.manifest.record_created(target, kind="runtime", runtime_required=True)
+        except OSError as exc:
+            result.update({"status": "copy_failed", "detail": str(exc)})
+            warning(f"KiriKiri version.dll 部署失败: {exc}")
+    else:
+        result.update({"status": "tool_missing", "detail": "kirikiri_unencrypted_version not found"})
+        warning("Xp3Pack 补丁需要 KirikiriTools version.dll，但发布包中未找到")
+    if pipeline.diagnostics:
+        pipeline.diagnostics.set("kirikiri_unencrypted_version_bridge", result)
+    return result
+
 def setup_engine_repack(pipeline, engine, game_path: Path):
     """在 repack 前设置引擎的上下文（游戏目录、工作区路径等）。
 
@@ -864,6 +861,18 @@ def backup_game_files(pipeline, game_path: Path, items: list | None = None, engi
                 sig = archive.with_name(archive.name + ".sig")
                 if sig.exists():
                     files_to_backup.add(sig)
+            # Static KRKR writes patch-layer files directly under the game
+            # directory. Back up pre-existing layers so a failed verification
+            # can restore them byte-for-byte instead of merely deleting new files.
+            patch_targets = [
+                game_dir / "patch.xp3",
+                game_dir / "_translation_meta" / "kirikiri_patch.xp3",
+                game_dir / "_translation_meta" / "kirikiri_patch_manifest.txt",
+            ]
+            patch_dir = game_dir / "_translation_meta" / "kirikiri_patch"
+            if patch_dir.is_dir():
+                patch_targets.extend(path for path in patch_dir.rglob("*") if path.is_file())
+            files_to_backup.update(path for path in patch_targets if path.is_file())
         for item in items:
             if engine_name == "kirikiri" and not _kirikiri_should_copy_loose_script(item):
                 continue

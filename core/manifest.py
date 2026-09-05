@@ -405,6 +405,16 @@ class GameManifest:
             p = self.game_dir / name
             if p.exists():
                 files.append(p)
+        for rel in (
+            "_translation_meta/kirikiri_patch.xp3",
+            "_translation_meta/kirikiri_patch_manifest.txt",
+            "_translation_meta/kirikiri_patch",
+        ):
+            p = self.game_dir / rel
+            if p.exists():
+                files.append(p)
+                if p.is_dir():
+                    files.extend(child for child in p.rglob("*") if child.exists())
         # RPG Maker runtime hook artifacts
         for rel in ("js/rpgmaker_hook.js", "www/js/rpgmaker_hook.js",
                      "save/hook_translation_map.json", "www/save/hook_translation_map.json",

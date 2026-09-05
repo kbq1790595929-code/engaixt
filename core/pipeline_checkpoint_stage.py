@@ -169,10 +169,12 @@ async def run_checkpoint_resume_fast_path(
         items, source_lang, target_lang, data = pipeline._load_items_from_checkpoint_json(checkpoint)
 
     if not items:
-        if pipeline.diagnostics:
-            pipeline.diagnostics.warn("检查点中没有可续翻文本", checkpoint=str(checkpoint))
-            pipeline.diagnostics.finish(False)
-        return False
+        return pipeline._fail_stage_code(
+            "translate",
+            "translation_no_result",
+            detail=f"checkpoint={checkpoint}; no resumable items",
+            next_actions=("重新提取文本，或选择包含原文和译文的有效检查点。",),
+        )
 
     items = pipeline._apply_configured_translation_scope(
         engine,
@@ -181,11 +183,13 @@ async def run_checkpoint_resume_fast_path(
         note="检查点续翻",
     )
     if not items:
-        if pipeline.diagnostics:
-            pipeline.diagnostics.warn("当前补翻策略没有选中任何文本", checkpoint=str(checkpoint))
-            pipeline.diagnostics.finish(False)
         warning("当前补翻策略没有选中任何文本")
-        return False
+        return pipeline._fail_stage_code(
+            "translate",
+            "translation_no_result",
+            detail=f"checkpoint={checkpoint}; configured scope selected no items",
+            next_actions=("调整翻译覆盖范围后重试。",),
+        )
 
     pipeline._checkpoint_path = checkpoint
     pipeline._reuse_checkpoint_workspace_if_available(checkpoint)

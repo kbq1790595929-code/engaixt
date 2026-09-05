@@ -21,10 +21,14 @@ def run_archive_stage(pipeline, path: Path) -> Path | None:
     extract_dir = pipeline.workspace.root / "extracted"
     result = extract_archive(path, extract_dir)
     if not result:
-        pipeline.diagnostics.error("解压失败", archive=path)
-        pipeline.diagnostics.suggest("确认压缩包未损坏，并安装 patool/7z/unrar 后重试。")
         error("解压失败")
-        pipeline.diagnostics.finish(False)
+        pipeline._fail_stage_code(
+            "archive",
+            "archive_extract_failed",
+            detail=f"archive={path}",
+            rollback=True,
+            next_actions=("确认压缩包完整，或先解压后选择游戏目录。",),
+        )
         return None
 
     game_root = find_game_root(extract_dir) or extract_dir
@@ -83,14 +87,20 @@ def run_detection_stage(pipeline, path: Path, injector: str | None):
 
 def run_extract_stage(pipeline, path: Path, engine, file_filter: list[str] | None = None):
     pipeline._update_progress("extract")
+    pipeline._current_game_path = path
     if not can_extract(engine):
         pipeline._record_unsupported_engine(engine)
         engine = pipeline._fallback_generic(path) or engine
+    pipeline._current_engine = engine
 
     engine._progress = pipeline.progress
     engine._manifest = getattr(pipeline, "manifest", None)
     try:
         items = engine.unpack(path, pipeline.workspace.root)
+    except Exception as exc:
+        pipeline._extract_stage_error = str(exc)
+        items = []
+        warning(f"{getattr(engine, 'label', '引擎')} 文本提取异常: {exc}")
     finally:
         engine._progress = None
 

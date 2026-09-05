@@ -1,5 +1,18 @@
 ﻿function on_meta(key, val) {
-    if (key === "text_count") {
+    if (key === "stage_failure") {
+        const failure = (val && typeof val === "object") ? val : {};
+        const message = String(failure.user_message || t("当前阶段执行失败"));
+        pushLog("error", message);
+        const detail = String(failure.technical_detail || "").trim();
+        if (detail) pushLog("warn", t("技术详情: ") + detail);
+        const fallback = document.getElementById("krkr-fallback-btn");
+        const canRealtime = failure.fallback === "realtime" || failure.fallback_available === true;
+        if (fallback) {
+            fallback.hidden = !canRealtime;
+            fallback.disabled = !canRealtime;
+        }
+        on_status("失败");
+    } else if (key === "text_count") {
         document.getElementById("stat-text-count").textContent = val;
         document.getElementById("stat-files").hidden = true;
         showStats();
@@ -223,6 +236,11 @@ function resetRun() {
         stepEl.textContent = t("就绪");
     }
     hideStats();
+    const fallback = document.getElementById("krkr-fallback-btn");
+    if (fallback) {
+        fallback.hidden = true;
+        fallback.disabled = true;
+    }
 }
 
 // ── Drop Zone ──
@@ -363,7 +381,7 @@ async function schedulePreflightExtraction(path, info) {
 
 function _isRealtimeOnlyEngine(info) {
     const name = String(info?.name || "").toLowerCase();
-    return ["kirikiri", "unity", "xunity_realtime", "unity_arch000_lua"].includes(name);
+    return ["unity", "xunity_realtime", "unity_arch000_lua"].includes(name);
 }
 
 function _realtimeOnlyMessage(info) {

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, fields
 
 CONFIG_PATH = Path.home() / ".game_translator_config.json"
 DEFAULT_TOOL_UPDATE_INTERVAL_HOURS = 5 * 24
+CONFIG_SCHEMA_VERSION = 3
 
 # --- 配置 schema 的权威定义 ---------------------------------------------
 # 敏感字段：绝不允许进入 diagnostics、日志或任何导出。
@@ -49,6 +50,7 @@ DIAGNOSTIC_SNAPSHOT_FIELDS = frozenset({
     "translation_cache_enabled",
     "translation_cache_auto_cleanup",
     "translation_cache_max_size_gb",
+    "selection_preflight_enabled",
     "keep_workspace",
     "workspace_dir",
     "tools_dir",
@@ -79,6 +81,7 @@ DIAGNOSTIC_SNAPSHOT_FIELDS = frozenset({
 
 @dataclass
 class Config:
+    config_schema_version: int = CONFIG_SCHEMA_VERSION
     openai_api_key: str = ""
     openai_model: str = "gpt-5.4-mini"
     deepseek_api_key: str = ""
@@ -108,6 +111,7 @@ class Config:
     translation_cache_enabled: bool = True  # 全局 API 译文缓存；关闭后不读取/写入跨任务缓存
     translation_cache_auto_cleanup: bool = True  # 缓存超过阈值后自动清理旧记录
     translation_cache_max_size_gb: float = 1.0  # 全局译文缓存上限，默认 1GB
+    selection_preflight_enabled: bool = False  # 选中游戏后是否自动解包提取并估算费用
     keep_workspace: bool = False
     workspace_dir: str = ""  # 空则默认 Downloads/.game_translator/workspaces
     frida_timeout: int = 60  # Frida 密钥捕获超时秒数
@@ -126,7 +130,7 @@ class Config:
     bgi_font_height_scale: float = 0.95  # BGI Frida Chinese fallback font scale
     kirikiri_use_external_krkrdump: bool = False  # 默认不用第三方 KrkrDumpLoader，避免桌面环境副作用
     kirikiri_auto_launch_dump: bool = False  # 默认不自动拉起游戏做 dump，避免影响加速器/桌面环境
-    kirikiri_enable_static_patch: bool = False  # 实验开关：默认不做 KRKR 静态回填/patch.xp3
+    kirikiri_enable_static_patch: bool = True  # KRKR 默认静态预检/回填；保护或失败时再提供实时后备
     kirikiri_runtime_completion_mode: str = "captured_only"  # captured_only/coverage/all
     kirikiri_runtime_merge_captures: bool = True  # 续翻时合并运行时捕获到的新文本
     kirikiri_no_window_timeout_seconds: int = 45  # KRKR 启动后无可见游戏窗口的失败判定时间
@@ -168,8 +172,17 @@ class Config:
         if CONFIG_PATH.exists():
             try:
                 data = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+                try:
+                    schema_version = int(data.get("config_schema_version", 0) or 0)
+                except (TypeError, ValueError):
+                    schema_version = 0
                 if int(data.get("tool_update_interval_hours", 0) or 0) == 24:
                     data["tool_update_interval_hours"] = DEFAULT_TOOL_UPDATE_INTERVAL_HOURS
+                # Schema 2 made this option opt-in by default. Keep every
+                # deliberate opt-out written by schema 2 or later intact.
+                if schema_version < 2 and data.get("kirikiri_enable_static_patch") is False:
+                    data["kirikiri_enable_static_patch"] = True
+                data["config_schema_version"] = CONFIG_SCHEMA_VERSION
                 return cls(**cls._validated(data))
             except (json.JSONDecodeError, TypeError):
                 pass

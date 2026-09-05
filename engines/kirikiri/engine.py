@@ -65,6 +65,25 @@ from engines.kirikiri.garbro import (
     _extract_garbro_entries,
     _garbro_script_entries,
 )
+from engines.kirikiri.external_tools import (
+    find_vntextpatch_json,
+    load_vntextpatch_json_items,
+    promote_script_files,
+    run_msg_tool_unpack,
+    run_vntextpatch_import,
+    run_vntextpatch_export,
+    run_xp3pack,
+    write_vntextpatch_translation_json,
+)
+from engines.kirikiri.extract_progress import (
+    archive_index_message,
+    archive_script_message,
+    emit_extract_progress,
+    external_tool_message,
+    script_parse_message,
+    should_report_item,
+)
+from engines.kirikiri.patch_policy import changed_items_require_stream_bridge
 from engines.kirikiri.spans import (
     _allow_plain_kag_script,
     _clean_runtime_capture_text,
@@ -186,6 +205,11 @@ class KiriKiriEngine(EngineBase):
         self._static_external_script_files = 0
         self._static_external_decrypt_succeeded = False
         self._static_external_tool_probes: list[_ExternalToolProbe] = []
+        self._static_external_tool_attempts: list[dict] = []
+        self._static_external_promoted_files: set[Path] = set()
+        self._vntextpatch_export_dir = ""
+        self._static_repack_failed_files: list[str] = []
+        self._kirikiri_xp3pack_used = False
         self._protected_script_samples: list[dict[str, object]] = []
         self._protected_payload_kinds: set[str] = set()
         self._xp3_extraction_diagnoses: list[_ExtractionDiagnosis] = []
@@ -196,13 +220,34 @@ class KiriKiriEngine(EngineBase):
         self._xp3_static_filter_schemes = _detect_xp3_static_filter_schemes(game_dir)
         if xp3_files:
             candidate_xp3 = _select_script_xp3_files(xp3_files)
+            emit_extract_progress(self, f"KRKR：准备解析 {len(candidate_xp3)} 个脚本封包")
+            internal_before = {
+                path.relative_to(original_dir)
+                for path in original_dir.rglob("*")
+                if path.is_file()
+            }
             internal_extracted = self._try_extract_internal_xp3(original_dir, candidate_xp3)
+            self._xp3_internal_files = {
+                path.relative_to(original_dir)
+                for path in original_dir.rglob("*")
+                if path.is_file() and path.relative_to(original_dir) not in internal_before
+            }
             needs_external_static = (
                 not internal_extracted
                 or bool(getattr(self, "_protected_archives", []))
                 or int(getattr(self, "_protected_script_count", 0) or 0) > 0
             )
             external_extracted = self._try_extract_xp3(original_dir, candidate_xp3) if needs_external_static else False
+            if external_extracted:
+                # A validated external result is authoritative. Do not merge
+                # an earlier partial internal extraction into it.
+                for relative in getattr(self, "_xp3_internal_files", set()):
+                    stale = original_dir / relative
+                    try:
+                        if stale.is_file() and relative not in getattr(self, "_static_external_promoted_files", set()):
+                            stale.unlink()
+                    except OSError:
+                        warning(f"KiriKiri 清理未采用的内置 XP3 结果失败: {relative}")
             self._xp3_extracted = internal_extracted or external_extracted
 
         dump_dir = game_dir / "_translation_meta" / "kirikiri_dump"
@@ -238,6 +283,12 @@ class KiriKiriEngine(EngineBase):
                 script_jobs.append((script_file, original_dir, from_xp3, rel))
         items.extend(self._extract_script_jobs(script_jobs))
 
+        if not items:
+            # VNTextPatch is a parser fallback only. Its JSON export is
+            # converted back to TextItem and therefore cannot create a second
+            # translation/checkpoint format.
+            items.extend(self._try_vntextpatch_export(original_dir))
+
         runtime_items = self._load_runtime_capture_items(game_dir)
         if runtime_items:
             existing_originals = {item.original for item in items}
@@ -260,12 +311,18 @@ class KiriKiriEngine(EngineBase):
 
     def _extract_script_jobs(self, jobs: list[tuple[Path, Path, bool, str]]) -> list[TextItem]:
         out: list[TextItem] = []
-        for script_file, root, from_xp3, _rel in jobs:
+        total = len(jobs)
+        for current, (script_file, root, from_xp3, rel) in enumerate(jobs, start=1):
+            if should_report_item(current, total):
+                emit_extract_progress(self, script_parse_message(rel, current, total))
             out.extend(self._extract_script_file(script_file, root, from_xp3=from_xp3))
         return out
 
     def repack(self, items: list[TextItem], workspace: Path) -> None:
         items = self.filter_repack_items(items)
+        if not hasattr(self, "_static_external_tool_attempts"):
+            self._static_external_tool_attempts = []
+        self._static_repack_failed_files = []
         changed: dict[str, list[TextItem]] = {}
         for item in items:
             if _is_kirikiri_control_text_item(item):
@@ -278,12 +335,15 @@ class KiriKiriEngine(EngineBase):
 
         original_dir = workspace / "original"
         modified_files: list[Path] = []
+        failed_files: dict[str, list[TextItem]] = {}
         game_dir = getattr(self, "_game_dir", None)
         sjis_tunnel_encoder: _KirikiriSjisTunnelEncoder | None = None
         sjis_tunnel_files: list[str] = []
         placeholder_map: dict[str, str] = {}
         for rel, file_items in changed.items():
             target = original_dir / rel
+            if not target.exists():
+                failed_files[rel] = file_items
             if not target.exists():
                 warning(f"KiriKiri 回填跳过不存在文件: {rel}")
                 continue
@@ -302,6 +362,22 @@ class KiriKiriEngine(EngineBase):
                 modified_files.append(target)
                 if file_tunnel_encoder is not None:
                     sjis_tunnel_files.append(rel)
+            else:
+                failed_files[rel] = file_items
+
+        if failed_files:
+            recovered = self._try_vntextpatch_import(original_dir, failed_files)
+            for rel in recovered:
+                target = original_dir / rel
+                if target not in modified_files:
+                    modified_files.append(target)
+                failed_files.pop(rel, None)
+            self._static_repack_failed_files = sorted(failed_files)
+            if failed_files:
+                warning(
+                    "KiriKiri 静态回填仍有脚本失败: "
+                    + ", ".join(sorted(failed_files)[:8])
+                )
 
         if not modified_files:
             warning("KiriKiri 没有成功修改任何脚本文件")
@@ -314,7 +390,20 @@ class KiriKiriEngine(EngineBase):
 
         runtime_resource_overlay = bool(getattr(self, "_runtime_resource_overlay", False))
         patch_modified_files = modified_files
-        patch_changed = changed
+        # ``changed`` can also contain persisted runtime-capture entries. They
+        # have no workspace script to patch and are correctly skipped above;
+        # they must not decide how the successfully patched static scripts are
+        # deployed. This keeps a previous realtime session from forcing a
+        # normal root patch through an EXE-specific stream bridge.
+        patched_rels = {
+            _norm_rel(path.relative_to(original_dir))
+            for path in modified_files
+        }
+        patch_changed = {
+            _norm_rel(rel): group
+            for rel, group in changed.items()
+            if _norm_rel(rel) in patched_rels
+        }
         if runtime_resource_overlay:
             patch_modified_files = [
                 path for path in modified_files
@@ -342,7 +431,7 @@ class KiriKiriEngine(EngineBase):
             if not patch_modified_files:
                 warning("KiriKiri runtime overlay 没有可安全覆盖的剧情脚本，跳过补丁生成")
                 return
-        if runtime_resource_overlay or any(bool(item.meta.get("from_xp3")) for group in changed.values() for item in group):
+        if runtime_resource_overlay or any(bool(item.meta.get("from_xp3")) for group in patch_changed.values() for item in group):
             patch_path = original_dir / "patch.xp3"
             use_native_root_patch = (
                 isinstance(game_dir, Path)
@@ -353,7 +442,7 @@ class KiriKiriEngine(EngineBase):
                 patch_changed,
                 neutralize_koihazi=use_native_root_patch,
             )
-            _write_xp3_patch(
+            self._write_patch_archive(
                 patch_path,
                 original_dir,
                 patch_modified_files,
@@ -418,7 +507,7 @@ class KiriKiriEngine(EngineBase):
                             and self._should_use_native_root_patch(game_dir, remaining_changed)
                             and not runtime_resource_overlay
                         )
-                        _write_xp3_patch(
+                        self._write_patch_archive(
                             patch_path,
                             original_dir,
                             remaining_files,
@@ -479,33 +568,20 @@ class KiriKiriEngine(EngineBase):
         ]
 
     def _should_use_patch_bridge(self, game_dir: Path, changed: dict[str, list[TextItem]] | None = None) -> bool:
-        if changed:
-            for group in changed.values():
-                for item in group:
-                    meta = item.meta or {}
-                    if bool(meta.get("runtime_dump")) or bool(meta.get("runtime_capture")):
-                        return True
+        # Decide from the sources being patched, not from an unrelated archive
+        # diagnosis. A single protected non-script entry must not make every
+        # normal, statically extracted KAG script depend on an EXE-specific
+        # bridge signature.
+        if changed is not None:
+            return changed_items_require_stream_bridge(changed)
 
-        if int(getattr(self, "_runtime_dump_count", 0) or 0) > 0:
-            return True
-        if getattr(self, "_runtime_dump_rels", set()):
-            return True
-
-        meta_dir = game_dir / "_translation_meta"
-        dump_dir = meta_dir / "kirikiri_dump"
-        if dump_dir.is_dir() and any(
-            path.is_file() and path.suffix.lower() in self._SCRIPT_EXTS
-            for path in dump_dir.rglob("*")
-        ):
-            return True
-        dump_zip = meta_dir / "kirikiri_dump.zip"
-        if dump_zip.exists() and dump_zip.stat().st_size > 0:
-            return True
-
-        if self._should_use_native_root_patch(game_dir, changed):
-            return False
-
-        return bool(getattr(self, "_protected_archives", []))
+        # This fallback is retained for callers that query policy before they
+        # have constructed a changed-item map. ``repack`` always supplies the
+        # map above, so stale dump files from an earlier run cannot affect it.
+        return bool(
+            int(getattr(self, "_runtime_dump_count", 0) or 0)
+            or getattr(self, "_runtime_dump_rels", set())
+        )
 
     def _should_use_native_root_patch(self, game_dir: Path, changed: dict[str, list[TextItem]] | None = None) -> bool:
         if changed:
@@ -678,6 +754,88 @@ class KiriKiriEngine(EngineBase):
             "failed": failed,
         }
 
+    def _write_patch_archive(
+        self,
+        output_path: Path,
+        root: Path,
+        files: list[Path],
+        *,
+        filters_by_rel: dict[str, dict[str, object]] | None = None,
+        include_basename_aliases: bool = False,
+    ) -> None:
+        """Write an XP3 patch and use Xp3Pack only for a validated fallback."""
+        try:
+            _write_xp3_patch(
+                output_path,
+                root,
+                files,
+                filters_by_rel=filters_by_rel,
+                include_basename_aliases=include_basename_aliases,
+            )
+            index = _read_xp3_index(output_path)
+            if not index.entries:
+                raise ValueError("EngAixt XP3 writer produced an empty index")
+            return
+        except Exception as exc:
+            if filters_by_rel:
+                raise RuntimeError(
+                    "EngAixt XP3 writer failed for filtered scripts; "
+                    f"Xp3Pack cannot preserve archive filters: {exc}"
+                ) from exc
+
+            candidate_root = root.parent / "external_candidates" / "kirikiri_xp3pack"
+            if candidate_root.exists():
+                shutil.rmtree(candidate_root)
+            input_dir = candidate_root / "patch_input"
+            input_dir.mkdir(parents=True, exist_ok=True)
+            basename_counts: dict[str, int] = {}
+            normalized: list[tuple[Path, str]] = []
+            for source in files:
+                try:
+                    rel = _norm_rel(source.relative_to(root))
+                except ValueError:
+                    continue
+                if not rel or rel.startswith("../") or "/../" in rel:
+                    continue
+                normalized.append((source, rel))
+                basename = Path(rel).name.casefold()
+                basename_counts[basename] = basename_counts.get(basename, 0) + 1
+            for source, rel in normalized:
+                target = input_dir / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                basename = Path(rel).name
+                if include_basename_aliases and "/" in rel and basename_counts.get(basename.casefold()) == 1:
+                    alias = input_dir / basename
+                    if not alias.exists():
+                        shutil.copy2(source, alias)
+
+            candidate_archive = candidate_root / "patch.xp3"
+            result = run_xp3pack(input_dir, candidate_archive)
+            attempt = {
+                **result.to_dict(),
+                "role": "archive_pack",
+                "fallback_for": "engaixt_xp3_writer",
+            }
+            if not hasattr(self, "_static_external_tool_attempts"):
+                self._static_external_tool_attempts = []
+            self._static_external_tool_attempts.append(attempt)
+            if not result.ok or not candidate_archive.is_file():
+                raise RuntimeError(
+                    "EngAixt XP3 writer failed and KirikiriTools Xp3Pack was unavailable: "
+                    f"{exc}; {result.detail}"
+                ) from exc
+            try:
+                fallback_index = _read_xp3_index(candidate_archive)
+            except Exception as fallback_exc:
+                raise RuntimeError(f"Xp3Pack output is not a readable XP3: {fallback_exc}") from fallback_exc
+            if not fallback_index.entries:
+                raise RuntimeError("Xp3Pack output has no entries")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate_archive, output_path)
+            self._kirikiri_xp3pack_used = True
+            info("KiriKiriTools Xp3Pack 已接管 XP3 补丁生成")
+
     def _write_static_rebuild_diagnostics(self, game_dir: Path, result: dict[str, object]) -> None:
         try:
             meta_dir = game_dir / "_translation_meta"
@@ -780,7 +938,9 @@ class KiriKiriEngine(EngineBase):
         parsed_archives = 0
         protected_archives: list[str] = []
 
-        for xp3 in xp3_files:
+        total_archives = len(xp3_files)
+        for archive_current, xp3 in enumerate(xp3_files, start=1):
+            emit_extract_progress(self, archive_index_message(xp3, archive_current, total_archives))
             try:
                 index = _read_xp3_index(xp3)
             except Exception as exc:
@@ -811,7 +971,13 @@ class KiriKiriEngine(EngineBase):
             skipped_binary = 0
             skipped_protected = 0
             static_filter_decrypted = 0
-            for entry in script_entries:
+            total_scripts = len(script_entries)
+            for script_current, entry in enumerate(script_entries, start=1):
+                if should_report_item(script_current, total_scripts):
+                    emit_extract_progress(
+                        self,
+                        archive_script_message(xp3, script_current, total_scripts),
+                    )
                 if entry.original_size > 8 * 1024 * 1024:
                     warning(f"KiriKiri 跳过过大的 XP3 脚本: {xp3.name}:{entry.name}")
                     continue
@@ -964,13 +1130,8 @@ class KiriKiriEngine(EngineBase):
             runtime_dump_script_count = int(getattr(self, "_runtime_dump_count", 0))
             runtime_dump_text_count = sum(1 for item in items if bool((item.meta or {}).get("runtime_dump")))
             runtime_capture_count = sum(1 for item in items if bool((item.meta or {}).get("runtime_capture")))
-            needs_patch_bridge = (
-                bool(getattr(self, "_protected_archives", []))
-                or runtime_dump_script_count > 0
-                or runtime_dump_text_count > 0
-                or runtime_capture_count > 0
-                or not items
-            )
+            changed_sources = {"all": items}
+            needs_patch_bridge = changed_items_require_stream_bridge(changed_sources)
             diagnoses = list(getattr(self, "_xp3_extraction_diagnoses", []) or [])
             primary_diagnosis = _primary_xp3_diagnosis(diagnoses)
             payload = {
@@ -1008,6 +1169,12 @@ class KiriKiriEngine(EngineBase):
                     }
                     for probe in getattr(self, "_static_external_tool_probes", []) or []
                 ],
+                "static_external_tool_attempts": list(
+                    getattr(self, "_static_external_tool_attempts", []) or []
+                ),
+                "tool_attempts": list(
+                    getattr(self, "_static_external_tool_attempts", []) or []
+                ),
                 "protection_layer": (
                     "no_protection"
                     if bool(getattr(self, "_static_external_decrypt_succeeded", False)) and items
@@ -1155,73 +1322,255 @@ class KiriKiriEngine(EngineBase):
         return copied
 
     def _try_extract_xp3(self, extract_dir: Path, xp3_files: list[Path]) -> bool:
+        if not hasattr(self, "_static_external_archives"):
+            self._static_external_archives = []
+        if not hasattr(self, "_static_external_extracted_files"):
+            self._static_external_extracted_files = 0
+        if not hasattr(self, "_static_external_script_files"):
+            self._static_external_script_files = 0
+        if not hasattr(self, "_static_external_decrypt_succeeded"):
+            self._static_external_decrypt_succeeded = False
+        if not hasattr(self, "_static_external_tool_probes"):
+            self._static_external_tool_probes = []
+        if not hasattr(self, "_static_external_tool_attempts"):
+            self._static_external_tool_attempts = []
+        if not hasattr(self, "_static_external_promoted_files"):
+            self._static_external_promoted_files = set()
         garbro = self._find_garbro()
-        if not garbro:
+        if garbro:
+            total_archives = len(xp3_files)
+            for archive_current, xp3 in enumerate(xp3_files, start=1):
+                emit_extract_progress(
+                    self,
+                    external_tool_message("GARbro", xp3, archive_current, total_archives),
+                )
+                if self._try_extract_one_xp3_with_garbro(garbro, xp3, extract_dir):
+                    return True
+        else:
             debug("GARbro.Console 未找到，跳过自动 XP3 解包")
             if self._check_garbro_gui_available():
-                info("GARbro GUI 可用；第一版后台不会自动启动 GUI，可手动解包后重跑管线。")
-            return False
+                info("GARbro GUI 可用；后台不会自动启动 GUI，可手动解包后重跑管线。")
 
-        ok = False
-        for xp3 in xp3_files:
-            if not hasattr(self, "_static_external_archives"):
-                self._static_external_archives = []
-            if not hasattr(self, "_static_external_extracted_files"):
-                self._static_external_extracted_files = 0
-            if not hasattr(self, "_static_external_script_files"):
-                self._static_external_script_files = 0
-            if not hasattr(self, "_static_external_decrypt_succeeded"):
-                self._static_external_decrypt_succeeded = False
-            if not hasattr(self, "_static_external_tool_probes"):
-                self._static_external_tool_probes = []
-            list_result = _garbro_mod._probe_garbro_entries(garbro, xp3)
-            self._static_external_tool_probes.append(_ExternalToolProbe(
-                tool="garbro_console",
-                path=str(garbro),
-                archive_file=xp3.name,
-                status=list_result.status,
-                message=list_result.message,
-            ))
-            entries = _garbro_script_entries(xp3, list_result.entries)
-            if not entries:
-                debug(f"GARbro 列表未发现脚本文件: {xp3.name}")
+        # msg-tool is deliberately a second, independent candidate.  It is
+        # never merged with GARbro output and rc=0 is not considered success.
+        total_archives = len(xp3_files)
+        for archive_current, xp3 in enumerate(xp3_files, start=1):
+            emit_extract_progress(
+                self,
+                external_tool_message("msg-tool", xp3, archive_current, total_archives),
+            )
+            candidate_dir = extract_dir / ".external_candidates" / "msg_tool" / xp3.stem
+            result = run_msg_tool_unpack(xp3, candidate_dir)
+            self._static_external_tool_attempts.append({
+                **result.to_dict(),
+                "archive_file": xp3.name,
+                "role": "xp3_extract",
+            })
+            if not result.ok:
                 continue
-
-            before_files = _count_files(extract_dir)
-            before_scripts = _count_kirikiri_script_files(extract_dir)
-            extracted_this = _extract_garbro_entries(garbro, xp3, extract_dir, entries)
-            if not extracted_this:
-                warning(f"KiriKiri XP3 未能自动解包: {xp3.name}")
+            promoted = promote_script_files(candidate_dir, extract_dir, result.script_files)
+            if promoted <= 0:
                 continue
-
-            after_files = _count_files(extract_dir)
-            after_scripts = _count_kirikiri_script_files(extract_dir)
-            extracted_files = max(0, after_files - before_files)
-            extracted_scripts = max(0, after_scripts - before_scripts)
-            if extracted_scripts <= 0:
-                extracted_scripts = sum(
-                    1
-                    for entry in entries
-                    if (out_path := _safe_output_path(extract_dir, entry.name)) is not None and out_path.exists()
-                )
-            info(f"GARbro.Console 静态提取 {xp3.name}: {extracted_scripts}/{len(entries)} 个脚本")
-            ok = True
-            self._static_external_extractor = "garbro_console"
-            self._static_external_extractor_path = str(garbro)
+            self._static_external_extractor = "msg_tool"
+            self._static_external_extractor_path = result.path
+            self._static_external_extracted_files += promoted
+            self._static_external_script_files += promoted
+            self._static_external_promoted_files.update(
+                Path(rel) for rel in result.script_files
+            )
+            self._static_external_decrypt_succeeded = True
             if xp3.name not in self._static_external_archives:
                 self._static_external_archives.append(xp3.name)
-            self._static_external_extracted_files += extracted_files
-            self._static_external_script_files += extracted_scripts
-            if "yuzusoft_yuz_xp3" in getattr(self, "_protected_formats", set()) or xp3.name in getattr(self, "_protected_archives", []):
-                self._static_external_decrypt_succeeded = True
-        return ok
+            return True
+        return False
+
+    def _try_extract_one_xp3_with_garbro(self, garbro: Path, xp3: Path, extract_dir: Path) -> bool:
+        """Run GARbro in an isolated candidate directory."""
+        candidate_dir = extract_dir / ".external_candidates" / "garbro" / xp3.stem
+        list_result = _garbro_mod._probe_garbro_entries(garbro, xp3)
+        self._static_external_tool_probes.append(_ExternalToolProbe(
+            tool="garbro_console",
+            path=str(garbro),
+            archive_file=xp3.name,
+            status=list_result.status,
+            message=list_result.message,
+        ))
+        self._static_external_tool_attempts.append({
+            "tool": "garbro_console",
+            "path": str(garbro),
+            "version": "managed",
+            "archive_file": xp3.name,
+            "status": list_result.status,
+            "entries": len(list_result.entries),
+            "role": "xp3_list",
+            "output_summary": list_result.message[:500],
+        })
+        entries = _garbro_script_entries(xp3, list_result.entries)
+        if not entries:
+            debug(f"GARbro 列表未发现脚本文件: {xp3.name}")
+            return False
+
+        before_files = _count_files(candidate_dir)
+        extracted_this = _extract_garbro_entries(garbro, xp3, candidate_dir, entries)
+        if not extracted_this:
+            warning(f"KiriKiri XP3 未能自动解包: {xp3.name}")
+            self._static_external_tool_attempts.append({
+                "tool": "garbro_console",
+                "path": str(garbro),
+                "version": "managed",
+                "archive_file": xp3.name,
+                "status": "no_output",
+                "entries": len(entries),
+                "role": "xp3_extract",
+            })
+            return False
+
+        script_rels = [
+            str(path.relative_to(candidate_dir)).replace("\\", "/")
+            for path in candidate_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".ks", ".tjs", ".scn"}
+        ]
+        promoted = promote_script_files(candidate_dir, extract_dir, script_rels)
+        if promoted <= 0:
+            return False
+        extracted_files = max(0, _count_files(candidate_dir) - before_files)
+        info(f"GARbro.Console 静态提取 {xp3.name}: {promoted}/{len(entries)} 个脚本")
+        self._static_external_tool_attempts.append({
+            "tool": "garbro_console",
+            "path": str(garbro),
+            "version": "managed",
+            "archive_file": xp3.name,
+            "status": "success",
+            "entries": len(entries),
+            "generated_files": extracted_files,
+            "script_files": promoted,
+            "role": "xp3_extract",
+        })
+        self._static_external_extractor = "garbro_console"
+        self._static_external_extractor_path = str(garbro)
+        if xp3.name not in self._static_external_archives:
+            self._static_external_archives.append(xp3.name)
+        self._static_external_extracted_files += extracted_files
+        self._static_external_script_files += promoted
+        self._static_external_promoted_files.update(Path(rel) for rel in script_rels)
+        if "yuzusoft_yuz_xp3" in getattr(self, "_protected_formats", set()) or xp3.name in getattr(self, "_protected_archives", []):
+            self._static_external_decrypt_succeeded = True
+        return True
+
+    def _try_vntextpatch_export(self, original_dir: Path) -> list[TextItem]:
+        """Use VNTextPatch only when native parsing yielded no usable items."""
+        scripts = [
+            path for path in original_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".ks", ".tjs", ".scn"}
+        ]
+        if not scripts:
+            return []
+        output_dir = original_dir.parent / "external_candidates" / "vntextpatch"
+        result = run_vntextpatch_export(original_dir, output_dir)
+        self._static_external_tool_attempts.append({
+            **result.to_dict(),
+            "role": "script_extract",
+        })
+        if not result.ok:
+            return []
+        rows = load_vntextpatch_json_items(output_dir, original_dir)
+        items: list[TextItem] = []
+        for row in rows:
+            row.setdefault("meta", {})["from_external_tool"] = True
+            items.append(TextItem(**row))
+        if items:
+            info(f"VNTextPatch 备用脚本提取: {len(items)} 条")
+            self._static_external_extractor = "vntextpatch"
+            self._static_external_extractor_path = result.path
+            self._vntextpatch_export_dir = str(output_dir)
+        return items
+
+    def _try_vntextpatch_import(
+        self,
+        original_dir: Path,
+        failed_files: dict[str, list[TextItem]],
+    ) -> set[str]:
+        """Use VNTextPatch insertlocal for files native patching could not write."""
+        export_dir = Path(str(getattr(self, "_vntextpatch_export_dir", "") or ""))
+        if not export_dir.is_dir():
+            return set()
+        import_root = original_dir.parent / "external_candidates" / "vntextpatch_import"
+        if import_root.exists():
+            shutil.rmtree(import_root)
+        translation_root = import_root / "translations"
+        output_root = import_root / "patched"
+        recovered: set[str] = set()
+        format_by_suffix = {
+            ".ks": "kirikiriks",
+            ".scn": "kirikiriscn",
+            ".tjs": "kirikiritjs",
+        }
+
+        for rel, items in sorted(failed_files.items()):
+            rel = _norm_rel(rel)
+            source = original_dir / rel
+            if not source.is_file():
+                continue
+            source_json = find_vntextpatch_json(export_dir, rel)
+            if source_json is None:
+                self._static_external_tool_attempts.append({
+                    "tool": "vntextpatch",
+                    "role": "script_repack",
+                    "source_file": rel,
+                    "status": "missing_export_json",
+                })
+                continue
+            translation_json = translation_root / f"{rel}.json"
+            changed = write_vntextpatch_translation_json(source_json, translation_json, items)
+            if changed <= 0:
+                self._static_external_tool_attempts.append({
+                    "tool": "vntextpatch",
+                    "role": "script_repack",
+                    "source_file": rel,
+                    "status": "no_matching_translation",
+                })
+                continue
+            output = output_root / rel
+            format_name = format_by_suffix.get(source.suffix.lower())
+            if not format_name:
+                continue
+            result = run_vntextpatch_import(
+                source,
+                translation_json,
+                output,
+                format_name=format_name,
+            )
+            self._static_external_tool_attempts.append({
+                **result.to_dict(),
+                "role": "script_repack",
+                "source_file": rel,
+                "translated_fields": changed,
+            })
+            if not result.ok or not output.is_file():
+                continue
+            try:
+                data = output.read_bytes()
+                if source.suffix.lower() == ".scn":
+                    valid = is_kirikiri_scn(data)
+                elif source.suffix.lower() == ".tjs":
+                    valid = data.startswith(b"TJS2100\x00") or _read_text_guess(output) is not None
+                else:
+                    valid = _read_text_guess(output) is not None
+                if not valid:
+                    continue
+                shutil.copy2(output, source)
+            except OSError:
+                continue
+            recovered.add(rel)
+
+        if recovered:
+            self._static_external_extractor = "vntextpatch"
+        return recovered
 
     def _find_garbro(self) -> Path | None:
         try:
-            from core.tool_manager import ensure_tool, find_tool
+            from core.tool_manager import find_tool
             tool = find_tool("garbro_mod") or find_tool("garbro_console")
-            if not tool:
-                tool = ensure_tool("garbro_console")
             if tool:
                 return tool
         except Exception:

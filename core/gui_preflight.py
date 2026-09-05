@@ -10,7 +10,6 @@ from core.pipeline import Pipeline
 
 
 REALTIME_ONLY_ENGINES = frozenset({
-    "kirikiri",
     "unity",
     "xunity_realtime",
     "unity_arch000_lua",
