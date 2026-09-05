@@ -34,21 +34,25 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
         })
 
     if not json_path.exists():
-        if pipeline.diagnostics:
-            pipeline.diagnostics.error("JSON 检查点不存在", json_path=json_path)
-            pipeline.diagnostics.finish(False)
         error(f"JSON 检查点不存在: {json_path}")
-        return False
+        return pipeline._fail_stage_code(
+            "patch",
+            "checkpoint_missing",
+            detail=f"json_path={json_path}",
+            next_actions=("先运行仅提取或选择有效的翻译检查点。",),
+        )
 
     data = _json.loads(json_path.read_text(encoding="utf-8"))
 
     engine = pipeline._select_engine(game_path)
     if engine is None:
-        if pipeline.diagnostics:
-            pipeline.diagnostics.error("无法识别游戏引擎，JSON 回填模式需要已知引擎", path=game_path)
-            pipeline.diagnostics.finish(False)
         error("无法识别游戏引擎，JSON 回填模式暂不支持")
-        return False
+        return pipeline._fail_stage_code(
+            "detect",
+            "engine_not_found",
+            detail=f"path={game_path}",
+            next_actions=("确认选择的是游戏目录或主 exe，然后重新检测。",),
+        )
     pipeline.manifest = GameManifest.for_game(game_path)
     pipeline.manifest.set_engine(engine)
 
@@ -89,11 +93,13 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
         translated = engine.filter_repack_items(translated)
 
     if not translated:
-        if pipeline.diagnostics:
-            pipeline.diagnostics.warn("JSON 中没有已翻译的条目", json_path=json_path)
-            pipeline.diagnostics.finish(False)
         warning("JSON 中没有已翻译的条目")
-        return False
+        return pipeline._fail_stage_code(
+            "patch",
+            "patch_no_translation",
+            detail=f"json_path={json_path}",
+            next_actions=("先完成 AI 翻译，再执行回填。",),
+        )
 
     info(f"从 JSON 加载: {len(translated)} 条翻译")
     if pipeline.diagnostics:
@@ -123,10 +129,12 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
         pipeline._setup_engine_repack(engine, game_path)
         pipeline._artifact_snapshot = pipeline.manifest.snapshot_tool_artifacts() if pipeline.manifest else set()
         if not can_repack(engine):
-            if pipeline.diagnostics:
-                pipeline.diagnostics.warn("当前引擎不支持自动回填", engine=getattr(engine, "name", ""))
-                pipeline.diagnostics.finish(False)
-            return False
+            return pipeline._fail_stage_code(
+                "repack",
+                "repack_failed",
+                detail=f"engine={getattr(engine, 'name', '')}",
+                next_actions=("该引擎需要专用工具手动回填资源。",),
+            )
         if getattr(engine, "name", "") == "kirikiri":
             pipeline._prepare_kirikiri_repack_sources_from_meta_dump(game_path, translated)
         if pipeline._workspace_has_repack_sources(translated):
@@ -139,16 +147,18 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
                 engine.unpack(game_path, pipeline.workspace.root)
             finally:
                 engine._progress = None
-        engine.repack(items=translated, workspace=pipeline.workspace.root)
+        if not pipeline._run_repack_stage(game_path, engine, translated):
+            return False
     else:
         pipeline._setup_engine_repack(engine, game_path)
         pipeline._artifact_snapshot = pipeline.manifest.snapshot_tool_artifacts() if pipeline.manifest else set()
         if not can_repack(engine):
-            if pipeline.diagnostics:
-                pipeline.diagnostics.warn("当前引擎不支持自动回填", engine=getattr(engine, "name", ""))
-                pipeline.diagnostics.suggest("该引擎需要专用工具手动回填资源。")
-                pipeline.diagnostics.finish(False)
-            return False
+            return pipeline._fail_stage_code(
+                "repack",
+                "repack_failed",
+                detail=f"engine={getattr(engine, 'name', '')}",
+                next_actions=("该引擎需要专用工具手动回填资源。",),
+            )
         if getattr(engine, "name", "") == "kirikiri":
             pipeline._prepare_kirikiri_repack_sources_from_meta_dump(game_path, translated)
         if pipeline._workspace_has_repack_sources(translated):
@@ -162,7 +172,8 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
             finally:
                 engine._progress = None
         pipeline._backup_game_files(game_path, translated, engine)
-        engine.repack(items=translated, workspace=pipeline.workspace.root)
+        if not pipeline._run_repack_stage(game_path, engine, translated):
+            return False
 
     pipeline._update_progress("字体替换", 75)
     if not runtime_overlay_only:
@@ -186,7 +197,27 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
                 "note": "运行时显示层 hook 模式，未写回游戏文本文件",
             })
         else:
-            pipeline.diagnostics.set("repack_verification", pipeline._verify_repack_outputs(game_path, translated, engine))
+            verification = pipeline._verify_repack_outputs(game_path, translated, engine)
+            pipeline.diagnostics.set("repack_verification", verification)
+            if (
+                getattr(engine, "name", "") == "kirikiri"
+                and not runtime_resource_overlay
+                and pipeline._kirikiri_verification_failed(verification)
+            ):
+                pipeline._rollback_game_changes(game_path)
+                return pipeline._fail_kirikiri_static_stage(
+                    game_path,
+                    engine,
+                    json_path,
+                    stage="repack",
+                    code="krkr_static_repack_failed",
+                    detail=(
+                        "static verification failed: "
+                        f"checked={verification.get('checked')}; "
+                        f"hits={verification.get('hits', 0)}; "
+                        f"invalid_archives={verification.get('invalid_archives', [])}"
+                    ),
+                )
     pipeline._prepare_runtime_dependencies(game_path, engine)
     pipeline._create_runtime_launchers(game_path, engine, json_path)
 

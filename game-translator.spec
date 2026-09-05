@@ -8,6 +8,10 @@ datas = [
     ('frida', 'frida'),
     ('frida_probe.js', '.'),
     ('engines/assets', 'engines/assets'),
+    # Optional KRKR static sidecars are copied when present. The source tree
+    # intentionally does not vendor third-party binaries by default.
+    ('_internal/tools', '_internal/tools'),
+    ('_internal/licenses', '_internal/licenses'),
 ]
 binaries = []
 hiddenimports = [

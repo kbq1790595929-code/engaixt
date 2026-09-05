@@ -55,6 +55,15 @@ def fail_insufficient_translation_coverage(pipeline, items: list) -> None:
         "请检查 API Key 是否配置，或查看 DeepSeek 调用日志。"
     )
     warning(message)
+    if hasattr(pipeline, "_fail_stage_code"):
+        pipeline._fail_stage_code(
+            "translate",
+            "translation_coverage_low",
+            detail=f"translated={translated}; total={total}; required={pipeline._required_translation_coverage_ratio():.3f}",
+            rollback=True,
+            next_actions=("检查翻译器、API Key 和网络后重试。",),
+        )
+        return
     if pipeline.diagnostics:
         min_ratio = pipeline._required_translation_coverage_ratio()
         pipeline.diagnostics.warn(

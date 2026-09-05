@@ -18,7 +18,7 @@ _TRANSLATED_GAMES_CACHE = {"at": 0.0, "items": [], "manifest_dir": ""}
 _COVER_CACHE: dict[str, object] = {}
 _LIBRARY_PRUNE_STATE = {"running": False, "last": 0.0}
 _LIBRARY_PRUNE_LOCK = threading.Lock()
-_REALTIME_ONLY_ENGINE_NAMES = {"kirikiri", "unity", "xunity_realtime", "unity_arch000_lua"}
+_REALTIME_ONLY_ENGINE_NAMES = {"unity", "xunity_realtime", "unity_arch000_lua"}
 _UNITY_REALTIME_ENGINE_NAMES = {"unity", "xunity_realtime", "unity_arch000_lua"}
 _SUPPORT_LINKS = {
     "official": "https://engaixt.com/",
@@ -329,6 +329,7 @@ class Api:
             "translation_cache_enabled": c.translation_cache_enabled,
             "translation_cache_auto_cleanup": c.translation_cache_auto_cleanup,
             "translation_cache_max_size_gb": c.translation_cache_max_size_gb,
+            "selection_preflight_enabled": c.selection_preflight_enabled,
 
             "keep_workspace": c.keep_workspace,
 
@@ -881,52 +882,9 @@ class Api:
 
     def preflight_extract(self, path: str, engine_name: str = ""):
         """Run selection-time extraction without invoking AI or patching files."""
-        from core.gui_preflight import preflight_extract
+        from core.gui_preflight_api import start_preflight_extract
 
-        resolved = self.resolve_path(path)
-        key = str(Path(resolved).resolve()).casefold()
-        with self._preflight_lock:
-            if key in self._preflight_paths:
-                return {"started": False, "reason": "already_running"}
-            self._preflight_paths.add(key)
-
-        def _run(task):
-            def progress_cb(step: str, pct: float):
-                self._js(f"on_progress({json.dumps(step)}, {float(pct):.2f})")
-
-            def meta_cb(meta_key: str, value):
-                payload = value
-                if meta_key in {"extraction_stats", "preflight_result"}:
-                    payload = dict(value) if isinstance(value, dict) else {"value": value}
-                    payload.setdefault("path", resolved)
-                self._js(f"on_meta({json.dumps(meta_key)}, {json.dumps(payload, ensure_ascii=False)})")
-
-            try:
-                self._js("on_status('运行中')")
-                self._js(f"on_log(20, {json.dumps('开始预检：解包并提取文本，不会开始翻译')})")
-                success = preflight_extract(
-                    resolved,
-                    engine_name=str(engine_name or ""),
-                    progress_callback=progress_cb,
-                    meta_callback=meta_cb,
-                )
-                if success:
-                    self._js("on_log(20, '预检完成：已计算预估费用，等待用户开始翻译')")
-                    self._js("on_status('空闲')")
-                else:
-                    self._js("on_log(50, '预检提取失败：未开始 AI 翻译')")
-                    self._js("on_status('失败')")
-                return bool(success)
-            except Exception as exc:
-                self._js(f"on_log(50, {json.dumps(f'预检提取失败: {exc}', ensure_ascii=False)})")
-                self._js("on_status('失败')")
-                return False
-            finally:
-                with self._preflight_lock:
-                    self._preflight_paths.discard(key)
-
-        self._tasks.submit("预检提取", _run, kind="preflight", counted=True)
-        return {"started": True, "path": resolved}
+        return start_preflight_extract(self, path, engine_name=engine_name)
 
 
 
@@ -1983,7 +1941,7 @@ class Api:
 
                     self._js("on_status('失败')")
 
-                    self._js(f"on_log(50, {json.dumps(f'{mode}失败，请查看日志')})")
+                    self._js(f"on_log(50, {json.dumps(f'{mode}已停止，具体原因已显示在运行日志')})")
 
 
 
@@ -2057,7 +2015,7 @@ class Api:
 
                     self._js("on_status('失败')")
 
-                    self._js("on_log(50, '文本润色失败，请查看日志')")
+                    self._js("on_log(50, '文本润色阶段未完成，游戏文件没有被修改；请检查翻译检查点、API Key 和运行日志中的具体阶段原因')")
 
             except Exception as e:
 

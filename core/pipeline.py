@@ -15,6 +15,7 @@ from core.diagnostics import Diagnostics
 from core.engine_capabilities import can_extract, can_repack, engine_support_summary
 from core.manifest import GameManifest
 from core.path_resolver import resolve_game_path
+from core.pipeline_failure import StageFailure, make_stage_failure, publish_stage_failure
 from core.pipeline_stages import stage
 from core.pipeline_lock import game_pipeline_lock
 from core import (
@@ -192,6 +193,227 @@ class Pipeline:
             except Exception:
                 pass
 
+    def _fail_stage(self, failure: StageFailure) -> bool:
+        """Publish a readable failure and finish the current run once."""
+        publish_stage_failure(self.diagnostics, self.meta, failure)
+        if self.diagnostics:
+            self.diagnostics.finish(False)
+        return False
+
+    def _fail_stage_code(self, stage: str, code: str, *, detail: str = "",
+                         fallback: str = "", actions: tuple[str, ...] = (),
+                         tool_attempts: tuple[dict, ...] = (),
+                         rollback: bool = False, **extra) -> bool:
+        return self._fail_stage(make_stage_failure(
+            stage,
+            code,
+            detail=detail,
+            fallback=fallback,
+            actions=actions,
+            tool_attempts=tool_attempts,
+            rollback=rollback,
+            **extra,
+        ))
+
+    def _fail_kirikiri_static_stage(
+        self,
+        game_path: Path,
+        engine,
+        checkpoint: Path | None,
+        *,
+        stage: str,
+        code: str,
+        detail: str = "",
+    ) -> bool:
+        """Report a KRKR static failure and prepare, but never start, realtime."""
+        game_dir = game_path if game_path.is_dir() else game_path.parent
+        meta_dir = game_dir / "_translation_meta"
+        capture_path = meta_dir / "kirikiri_runtime_capture.jsonl"
+        launcher: Path | None = None
+        try:
+            meta_dir.mkdir(parents=True, exist_ok=True)
+            if not capture_path.exists():
+                capture_path.write_text("", encoding="utf-8")
+            launcher = create_kirikiri_native_launcher(
+                game_path,
+                engine=engine,
+                checkpoint=checkpoint,
+            )
+        except Exception as exc:
+            detail = f"{detail}; realtime launcher preparation error: {exc}".strip("; ")
+
+        if launcher:
+            if self.diagnostics:
+                self.diagnostics.set("kirikiri_realtime_fallback", {
+                    "available": True,
+                    "launcher": str(launcher),
+                    "capture": str(capture_path),
+                    "started": False,
+                })
+                if self.manifest:
+                    self.manifest.record_created(launcher, kind="runtime", runtime_required=True)
+            info("KRKR 静态方案失败，已准备实时 Hook 启动器；等待用户确认")
+            return self._fail_stage_code(
+                stage,
+                code,
+                detail=detail,
+                fallback="realtime",
+                actions=("改用实时翻译",),
+                tool_attempts=tuple(getattr(engine, "_static_external_tool_attempts", []) or []),
+                rollback=True,
+                next_actions=("点击“改用实时翻译”启动 KRKR 原生 Hook。",),
+                fallback_launcher=str(launcher),
+                capture=str(capture_path),
+            )
+
+        return self._fail_stage_code(
+            "runtime",
+            "runtime_prepare_failed",
+            detail=detail or "KRKR 原生 Hook 启动器未生成",
+            rollback=True,
+            next_actions=("重新安装完整发布包，或使用仅提取检查工具组件。",),
+        )
+
+    def _rollback_game_changes(self, game_path: Path) -> bool:
+        """Restore manifest backups and remove only new KRKR patch artifacts."""
+        game_dir = game_path if game_path.is_dir() else game_path.parent
+        restored = False
+        if self.manifest:
+            for record in self.manifest.data.get("modified_files", []):
+                target = self.manifest._manifest_item_path(record)
+                backup = Path(str(record.get("backup") or ""))
+                if not backup.is_file():
+                    continue
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(backup, target)
+                    restored = True
+                except OSError as exc:
+                    warning(f"回滚游戏文件失败: {target} - {exc}")
+
+        # KiriKiri creates these during repack outside the normal copy-back
+        # directory. Preserve artifacts which existed before this run.
+        before = getattr(self, "_artifact_snapshot", set()) or set()
+        candidates = [
+            game_dir / "patch.xp3",
+            game_dir / "_translation_meta" / "kirikiri_patch.xp3",
+            game_dir / "_translation_meta" / "kirikiri_patch",
+            game_dir / "_translation_meta" / "kirikiri_patch_manifest.txt",
+        ]
+        for target in candidates:
+            if not target.exists() or str(target.resolve()) in before:
+                if not target.is_dir() or str(target.resolve()) not in before:
+                    continue
+                for child in sorted(target.rglob("*"), key=lambda path: len(path.parts), reverse=True):
+                    if str(child.resolve()) in before:
+                        continue
+                    try:
+                        if child.is_dir():
+                            child.rmdir()
+                        else:
+                            child.unlink()
+                    except OSError as exc:
+                        warning(f"鍥炴粴 KRKR 琛ヤ竵瀛愭枃浠跺垹闄ゅけ璐? {child} - {exc}")
+                continue
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+                restored = True
+            except OSError as exc:
+                warning(f"回滚 KRKR 补丁产物失败: {target} - {exc}")
+        if self.diagnostics:
+            self.diagnostics.set("failure_rollback", {"attempted": True, "restored": restored})
+        return restored
+
+    def _run_repack_stage(self, game_path: Path, engine, items: list) -> bool:
+        """Run repack as a failure-aware stage shared by both pipeline modes."""
+        try:
+            engine.repack(items, self.workspace.root)
+            failed_files = list(getattr(engine, "_static_repack_failed_files", []) or [])
+            if failed_files and getattr(engine, "name", "") == "kirikiri":
+                raise RuntimeError(
+                    "KRKR static repack left files unpatched: "
+                    + ", ".join(str(path) for path in failed_files[:8])
+                )
+            return True
+        except Exception as exc:
+            self._rollback_game_changes(game_path)
+            if getattr(engine, "name", "") == "kirikiri":
+                return self._fail_kirikiri_static_stage(
+                    game_path,
+                    engine,
+                    self._checkpoint_path,
+                    stage="repack",
+                    code="krkr_static_repack_failed",
+                    detail=str(exc),
+                )
+            return self._fail_stage_code(
+                "repack",
+                "repack_failed",
+                detail=str(exc),
+                rollback=True,
+                next_actions=("请确认游戏文件未被其他程序占用后重试。",),
+            )
+
+    def _kirikiri_verification_failed(self, verification: dict) -> bool:
+        if not verification or verification.get("engine") != "kirikiri":
+            return False
+        if verification.get("invalid_archives"):
+            return True
+        if not verification.get("checked"):
+            return True
+        return int(verification.get("hits", 0) or 0) <= 0
+
+    def _ensure_translator_ready(self, config, items: list, game_path: Path, engine=None) -> bool:
+        """Fail before any API call when the selected cloud translator lacks a key."""
+        translator_name = str(getattr(config, "active_translator", "") or "").strip().lower()
+        translator = _get_translator(translator_name)
+        if translator is None:
+            if getattr(engine, "name", "") == "kirikiri":
+                return self._fail_kirikiri_static_stage(
+                    game_path, engine, self._checkpoint_path,
+                    stage="translate", code="translation_no_result",
+                    detail=f"unknown_or_unavailable_translator={translator_name}",
+                )
+            return self._fail_stage_code(
+                "translate",
+                "translation_no_result",
+                detail=f"unknown_or_unavailable_translator={translator_name}",
+                rollback=True,
+                next_actions=("在设置中选择可用翻译器。",),
+            )
+
+        # A fully cached run can repack without a provider key. Load the cache
+        # before rejecting the configuration, so reruns remain offline-safe.
+        if game_path:
+            load_translations_from_cache(game_path, items)
+        if any(not _has_effective_translation(item) for item in items):
+            local_translators = {"hy_mt2"}
+            if translator_name not in local_translators:
+                try:
+                    from translators.factory import translator_api_key
+
+                    api_key = translator_api_key(translator_name, config)
+                except Exception:
+                    api_key = ""
+                if not api_key:
+                    if getattr(engine, "name", "") == "kirikiri":
+                        return self._fail_kirikiri_static_stage(
+                            game_path, engine, self._checkpoint_path,
+                            stage="translate", code="translation_key_missing",
+                            detail=f"translator={translator_name}; pending={sum(1 for item in items if not _has_effective_translation(item))}",
+                        )
+                    return self._fail_stage_code(
+                        "translate",
+                        "translation_key_missing",
+                        detail=f"translator={translator_name}; pending={sum(1 for item in items if not _has_effective_translation(item))}",
+                        rollback=True,
+                        next_actions=("在设置中填写当前翻译器的 API Key 后重试。",),
+                    )
+        return True
+
     def _reset_item_progress(self):
         self._item_progress_current = 0
         self._item_progress_total = 0
@@ -265,6 +487,18 @@ class Pipeline:
         return pipeline_translate_stage.has_required_translation_coverage(self, items, min_ratio)
 
     def _fail_insufficient_translation_coverage(self, items: list) -> None:
+        engine = getattr(self, "_current_engine", None)
+        if getattr(engine, "name", "") == "kirikiri":
+            translated = sum(1 for item in items if _has_effective_translation(item))
+            total = len(items)
+            return self._fail_kirikiri_static_stage(
+                getattr(self, "_current_game_path", Path()),
+                engine,
+                self._checkpoint_path,
+                stage="translate",
+                code="translation_coverage_low",
+                detail=f"translated={translated}; total={total}; required={self._required_translation_coverage_ratio():.3f}",
+            )
         return pipeline_translate_stage.fail_insufficient_translation_coverage(self, items)
 
     def _should_skip_cached_tail_translation(self, items: list, cached_count: int) -> tuple[bool, int, float]:
@@ -377,10 +611,26 @@ class Pipeline:
                 item for item in selected
                 if bool(getattr(item, "meta", {}).get("runtime_capture"))
             ]
-            if mode == "captured_only" and runtime_items:
+            static_items = [
+                item for item in selected
+                if not bool(getattr(item, "meta", {}).get("runtime_capture"))
+            ]
+            has_static_items = bool(static_items)
+
+            # A runtime capture is a supplement when static extraction produced
+            # usable items.  ``captured_only`` is only meaningful for a pure
+            # runtime result; applying it to a mixed result silently discarded
+            # the complete static catalog (for example 4,852 -> 28 items).
+            if mode == "captured_only" and runtime_items and not has_static_items:
                 selected = runtime_items
                 effective_coverage = 100
                 info(f"KiriKiri 补翻模式: 只翻译运行时捕获文本 {len(selected)}/{len(items)} 条")
+            elif mode == "captured_only" and runtime_items and has_static_items:
+                effective_coverage = 100 if int(coverage_percent or 100) >= 100 else coverage_percent
+                info(
+                    f"KiriKiri 静态文本已保留: 静态 {len(static_items)} 条 + "
+                    f"运行时补充 {len(runtime_items)} 条，共 {len(selected)} 条"
+                )
             elif mode == "all":
                 effective_coverage = 100
                 info(f"KiriKiri 补翻模式: 完整检查点补齐 {len(selected)} 条")
@@ -391,6 +641,10 @@ class Pipeline:
                 )
             if self.diagnostics:
                 self.diagnostics.set("kirikiri_runtime_completion_mode", mode)
+                self.diagnostics.set("kirikiri_static_items_preserved", has_static_items)
+                self.diagnostics.set("kirikiri_static_item_count", len(static_items))
+                self.diagnostics.set("kirikiri_runtime_capture_count", len(runtime_items))
+                self.diagnostics.set("kirikiri_translation_scope_count", len(selected))
 
         return self._apply_coverage_limit(selected, effective_coverage, note=note)
 
@@ -478,11 +732,15 @@ class Pipeline:
 
             # Step 2: 检测引擎
             engine, injector = self._run_detection_stage(path, injector)
+            self._current_engine = engine
+            self._current_game_path = path
             if engine is None:
-                # 兜底：实时翻译模式
-                info("未能识别游戏引擎，切换到实时翻译模式")
-                self._update_progress("实时翻译", 20)
-                return await self._fallback_realtime(path, launch)
+                return self._fail_stage_code(
+                    "detect",
+                    "engine_not_found",
+                    detail=f"path={path}",
+                    next_actions=("确认选择的是游戏目录或主 exe，然后重新检测。",),
+                )
 
             fast_checkpoint = None
             if not extract_only and not resume_json:
@@ -498,21 +756,54 @@ class Pipeline:
 
             if self._try_kirikiri_pre_extract_auto_dump(path, engine):
                 if getattr(engine, "_kirikiri_auto_dump_incomplete", False):
-                    self.diagnostics.finish(False)
-                    return False
+                    if getattr(engine, "name", "") == "kirikiri":
+                        return self._fail_kirikiri_static_stage(
+                            path,
+                            engine,
+                            checkpoint,
+                            stage="script_extract",
+                            code="krkr_static_extract_failed",
+                            detail="运行时 dump 目标不完整，静态脚本候选未通过验证",
+                        )
+                    return self._fail_stage_code(
+                        "script_extract",
+                        "extract_failed",
+                        detail="运行时 dump 目标不完整",
+                    )
 
             # Step 3: 解包文本
             engine, items, extracted_count = self._run_extract_stage(path, engine, file_filter)
             engine, items, extracted_count = self._try_kirikiri_auto_dump_stage(path, engine, items, file_filter)
             if getattr(engine, "_kirikiri_auto_dump_incomplete", False):
-                self.diagnostics.finish(False)
-                return False
+                return self._fail_kirikiri_static_stage(
+                    path,
+                    engine,
+                    checkpoint,
+                    stage="script_extract",
+                    code="krkr_static_extract_failed",
+                    detail="运行时 dump 目标不完整，静态脚本候选未通过验证",
+                ) if getattr(engine, "name", "") == "kirikiri" else self._fail_stage_code(
+                    "script_extract",
+                    "extract_failed",
+                    detail="运行时 dump 目标不完整",
+                )
             if not items:
                 if extracted_count:
                     warning("过滤后无可翻译文本")
-                    self.diagnostics.warn("过滤后没有可翻译文本", patterns=file_filter)
-                    self.diagnostics.finish(False)
-                    return False
+                    if getattr(engine, "name", "") == "kirikiri":
+                        return self._fail_kirikiri_static_stage(
+                            path,
+                            engine,
+                            checkpoint,
+                            stage="script_extract",
+                            code="krkr_no_readable_script",
+                            detail=f"提取结果 {extracted_count} 条，但过滤后没有可解析的可见文本",
+                        )
+                    return self._fail_stage_code(
+                        "script_extract",
+                        "no_readable_text",
+                        detail=f"提取结果 {extracted_count} 条，但过滤后没有可翻译文本",
+                    )
                 warning("未提取到可翻译文本")
                 self._record_no_items(engine, path, injector)
                 # xunity 模式：即使提取不到文本，也要部署运行时环境
@@ -530,28 +821,44 @@ class Pipeline:
                     self.diagnostics.finish(True)
                     return True
                 if getattr(engine, "name", "") == "kirikiri":
-                    return self._enter_kirikiri_runtime_capture_mode(
+                    return self._fail_kirikiri_static_stage(
                         path,
                         engine,
-                        injector,
                         checkpoint,
-                        launch=launch and not extract_only,
-                        extract_only=extract_only,
+                        stage="script_extract",
+                        code="krkr_no_readable_script",
+                        detail="内置解析器、GARbro 和 msg-tool 都没有产出可解析脚本",
                     )
-                self.diagnostics.finish(False)
-                return False
+                return self._fail_stage_code(
+                    "script_extract",
+                    "no_readable_text",
+                    detail=f"engine={getattr(engine, 'name', '')}",
+                )
             if getattr(engine, "name", "") == "kirikiri" and _has_runtime_capture_items(items):
                 if self.diagnostics:
                     self.diagnostics.set("injector", injector)
                     self.diagnostics.set("runtime_overlay_only", True)
                 info("KiriKiri 使用运行时捕获文本：离线翻译后将通过原生 KAGParser hook 显示")
 
-            # 覆盖率/补翻范围过滤
-            items = self._apply_configured_translation_scope(
-                engine,
-                items,
-                config.translation_coverage,
-            )
+            # Preflight must preserve the complete extraction result. In
+            # particular, KRKR's captured_only runtime mode is a translation
+            # scope for a real run, not a reason to discard static candidates
+            # from the checkpoint used by the GUI estimate.
+            if not extract_only:
+                items = self._apply_configured_translation_scope(
+                    engine,
+                    items,
+                    config.translation_coverage,
+                )
+            elif getattr(engine, "name", "") == "kirikiri" and _has_runtime_capture_items(items):
+                self.diagnostics.set("runtime_capture_scope_deferred", {
+                    "mode": "captured_only",
+                    "captured_count": sum(
+                        1 for item in items
+                        if bool(getattr(item, "meta", {}).get("runtime_capture"))
+                    ),
+                    "extracted_count": len(items),
+                })
 
             # 源语言检测
             source_lang, target_lang = self._detect_language_stage(items, config.target_lang)
@@ -591,6 +898,8 @@ class Pipeline:
                 return True
 
             # Step 5: AI 翻译（增量保存到 JSON）
+            if not self._ensure_translator_ready(config, items, path, engine):
+                return False
             self._update_progress("translate")
             self._reset_api_cache_stats(config.active_translator)
             items = await self._translate_with_checkpoint(
@@ -623,9 +932,22 @@ class Pipeline:
 
             if translated_count == 0:
                 warning("没有成功翻译任何文本！请检查 API Key 是否已配置。")
-                self.diagnostics.warn("未找到任何已翻译文本")
-                self.diagnostics.finish(False)
-                return False
+                if getattr(engine, "name", "") == "kirikiri":
+                    return self._fail_kirikiri_static_stage(
+                        path,
+                        engine,
+                        checkpoint,
+                        stage="translate",
+                        code="translation_no_result",
+                        detail="翻译阶段没有得到有效译文",
+                    )
+                return self._fail_stage_code(
+                    "translate",
+                    "translation_no_result",
+                    detail="没有成功翻译任何文本",
+                    rollback=True,
+                    next_actions=("检查翻译器、API Key 和网络连接后重试。",),
+                )
 
             # Step 6: 回填前备份
             self._update_progress("backup")
@@ -659,7 +981,8 @@ class Pipeline:
                     self.diagnostics.warn("当前引擎不支持自动回填", engine=getattr(engine, "name", ""))
                     self.diagnostics.suggest("使用“仅提取”导出 JSON，配合专用工具手动回填资源。")
                 else:
-                    engine.repack(items, self.workspace.root)
+                    if not self._run_repack_stage(path, engine, items):
+                        return False
 
             # Step 7.5: CJK 字体
             self._update_progress("fonts")
@@ -686,6 +1009,20 @@ class Pipeline:
                     self.manifest.record_new_tool_artifacts(self._artifact_snapshot, engine)
                 verification = self._verify_repack_outputs(path, items, engine)
                 self.diagnostics.set("repack_verification", verification)
+                if self._kirikiri_verification_failed(verification):
+                    self._rollback_game_changes(path)
+                    return self._fail_kirikiri_static_stage(
+                        path,
+                        engine,
+                        checkpoint,
+                        stage="repack",
+                        code="krkr_static_repack_failed",
+                        detail=(
+                            f"回填验证 checked={verification.get('checked')} "
+                            f"hits={verification.get('hits', 0)} "
+                            f"invalid_archives={verification.get('invalid_archives', [])}"
+                        ),
+                    )
             self._prepare_runtime_dependencies(path, engine)
             self._create_runtime_launchers(path, engine, checkpoint)
 
@@ -736,29 +1073,66 @@ class Pipeline:
 
             # Step 2: 检测引擎
             engine, injector = self._run_detection_stage(path, injector)
+            self._current_engine = engine
+            self._current_game_path = path
             if engine is None:
-                # 兜底：实时翻译模式
-                info("未能识别游戏引擎，切换到实时翻译模式")
-                self._update_progress("实时翻译", 20)
-                return await self._fallback_realtime(path, launch)
+                return self._fail_stage_code(
+                    "detect",
+                    "engine_not_found",
+                    detail=f"path={path}",
+                    next_actions=("确认选择的是游戏目录或主 exe，然后重新检测。",),
+                )
 
             if self._try_kirikiri_pre_extract_auto_dump(path, engine):
                 if getattr(engine, "_kirikiri_auto_dump_incomplete", False):
-                    self.diagnostics.finish(False)
-                    return False
+                    if getattr(engine, "name", "") == "kirikiri":
+                        return self._fail_kirikiri_static_stage(
+                            path,
+                            engine,
+                            self._checkpoint_path,
+                            stage="script_extract",
+                            code="krkr_static_extract_failed",
+                            detail="运行时 dump 目标不完整，静态脚本候选未通过验证",
+                        )
+                    return self._fail_stage_code(
+                        "script_extract",
+                        "extract_failed",
+                        detail="运行时 dump 目标不完整",
+                    )
 
             # Step 3: 解包文本
             engine, items, extracted_count = self._run_extract_stage(path, engine, file_filter)
             engine, items, extracted_count = self._try_kirikiri_auto_dump_stage(path, engine, items, file_filter)
             if getattr(engine, "_kirikiri_auto_dump_incomplete", False):
-                self.diagnostics.finish(False)
-                return False
+                return self._fail_kirikiri_static_stage(
+                    path,
+                    engine,
+                    self._checkpoint_path,
+                    stage="script_extract",
+                    code="krkr_static_extract_failed",
+                    detail="运行时 dump 目标不完整，静态脚本候选未通过验证",
+                ) if getattr(engine, "name", "") == "kirikiri" else self._fail_stage_code(
+                    "script_extract",
+                    "extract_failed",
+                    detail="运行时 dump 目标不完整",
+                )
             if not items:
                 if extracted_count:
                     warning("过滤后无可翻译文本")
-                    self.diagnostics.warn("过滤后没有可翻译文本", patterns=file_filter)
-                    self.diagnostics.finish(False)
-                    return False
+                    if getattr(engine, "name", "") == "kirikiri":
+                        return self._fail_kirikiri_static_stage(
+                            path,
+                            engine,
+                            self._checkpoint_path,
+                            stage="script_extract",
+                            code="krkr_no_readable_script",
+                            detail=f"提取结果 {extracted_count} 条，但过滤后没有可解析的可见文本",
+                        )
+                    return self._fail_stage_code(
+                        "script_extract",
+                        "no_readable_text",
+                        detail=f"提取结果 {extracted_count} 条，但过滤后没有可翻译文本",
+                    )
                 warning("未提取到可翻译文本")
                 self._record_no_items(engine, path, injector)
                 if injector == "xunity":
@@ -774,16 +1148,19 @@ class Pipeline:
                     self.diagnostics.finish(True)
                     return True
                 if getattr(engine, "name", "") == "kirikiri":
-                    return self._enter_kirikiri_runtime_capture_mode(
+                    return self._fail_kirikiri_static_stage(
                         path,
                         engine,
-                        injector,
                         self._checkpoint_path,
-                        launch=launch,
-                        extract_only=False,
+                        stage="script_extract",
+                        code="krkr_no_readable_script",
+                        detail="内置解析器、GARbro 和 msg-tool 都没有产出可解析脚本",
                     )
-                self.diagnostics.finish(False)
-                return False
+                return self._fail_stage_code(
+                    "script_extract",
+                    "no_readable_text",
+                    detail=f"engine={getattr(engine, 'name', '')}",
+                )
             if getattr(engine, "name", "") == "kirikiri" and _has_runtime_capture_items(items):
                 if self.diagnostics:
                     self.diagnostics.set("injector", injector)
@@ -834,6 +1211,9 @@ class Pipeline:
             self.diagnostics.step("cache_load", loaded=cached_count, total=len(items))
             skip_ai_tail = self._skip_cached_tail_translation(items, cached_count)
 
+            if not self._ensure_translator_ready(config, items, path, engine):
+                return False
+
             # Step 5: AI 翻译
             self._update_progress("translate")
             translator = _get_translator(config.active_translator)
@@ -880,10 +1260,22 @@ class Pipeline:
             # 防线 6: 翻译量为 0 且非运行时注入模式 → 阻断，避免无翻译直接启动游戏
             if translated_count == 0:
                 warning("没有成功翻译任何文本！请检查 API Key 是否已配置。")
-                self.diagnostics.warn("未找到任何已翻译文本",
-                    hint="请在设置中配置 DeepSeek API Key，然后重新运行翻译。")
-                self.diagnostics.finish(False)
-                return False
+                if getattr(engine, "name", "") == "kirikiri":
+                    return self._fail_kirikiri_static_stage(
+                        path,
+                        engine,
+                        self._checkpoint_path,
+                        stage="translate",
+                        code="translation_no_result",
+                        detail="翻译阶段没有得到有效译文",
+                    )
+                return self._fail_stage_code(
+                    "translate",
+                    "translation_no_result",
+                    detail="没有成功翻译任何文本",
+                    rollback=True,
+                    next_actions=("检查翻译器、API Key 和网络连接后重试。",),
+                )
 
             if injector == "frida":
                 self._checkpoint_path = self.workspace.root / "translation_checkpoint.json"
@@ -921,7 +1313,8 @@ class Pipeline:
                     self.diagnostics.warn("当前引擎不支持自动回填", engine=getattr(engine, "name", ""))
                     self.diagnostics.suggest("使用“仅提取”导出 JSON，配合专用工具手动回填资源。")
                 else:
-                    engine.repack(items, self.workspace.root)
+                    if not self._run_repack_stage(path, engine, items):
+                        return False
 
             # Step 7.5: CJK 字体替换（Godot 游戏）
             self._update_progress("fonts")
@@ -948,6 +1341,20 @@ class Pipeline:
                     self.manifest.record_new_tool_artifacts(self._artifact_snapshot, engine)
                 verification = self._verify_repack_outputs(path, items, engine)
                 self.diagnostics.set("repack_verification", verification)
+                if self._kirikiri_verification_failed(verification):
+                    self._rollback_game_changes(path)
+                    return self._fail_kirikiri_static_stage(
+                        path,
+                        engine,
+                        self._checkpoint_path,
+                        stage="repack",
+                        code="krkr_static_repack_failed",
+                        detail=(
+                            f"回填验证 checked={verification.get('checked')} "
+                            f"hits={verification.get('hits', 0)} "
+                            f"invalid_archives={verification.get('invalid_archives', [])}"
+                        ),
+                    )
             self._prepare_runtime_dependencies(path, engine)
             self._create_runtime_launchers(path, engine, self._checkpoint_path)
 
@@ -1011,11 +1418,14 @@ class Pipeline:
             if fallback.exists():
                 checkpoint = fallback
         if not checkpoint.exists():
-            if self.diagnostics:
-                self.diagnostics.error("translation checkpoint missing", json_path=str(checkpoint))
-                self.diagnostics.finish(False)
             error(f"translation checkpoint missing: {checkpoint}")
-            return False
+            return self._fail_stage_code(
+                "patch",
+                "checkpoint_missing",
+                detail=f"json_path={checkpoint}",
+                rollback=True,
+                next_actions=("重新完成提取，或选择包含原文和译文的有效检查点。",),
+            )
 
         data = _json.loads(checkpoint.read_text(encoding="utf-8-sig"))
         items: list[TextItem] = []
@@ -1342,6 +1752,9 @@ class Pipeline:
 
     def _prepare_kirikiri_patch_bridge_tooling(self, game_path: Path, engine) -> None:
         return pipeline_runtime_stage.prepare_kirikiri_patch_bridge_tooling(self, game_path, engine)
+
+    def _prepare_kirikiri_unencrypted_version_bridge(self, game_path: Path, engine) -> dict:
+        return pipeline_runtime_stage.prepare_kirikiri_unencrypted_version_bridge(self, game_path, engine)
 
     def _setup_engine_repack(self, engine, game_path: Path):
         return pipeline_runtime_stage.setup_engine_repack(self, engine, game_path)

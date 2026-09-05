@@ -52,6 +52,26 @@ def run_preflight(game_path: Path, engine: object | None = None,
     if engine_name == "kirikiri":
         _check_managed_tool("garbro_console", checks, suggestions, required=False)
         _check_managed_tool("garbro_gui", checks, suggestions, required=False)
+        _check_managed_tool("msg_tool", checks, suggestions, required=False)
+        _check_managed_tool("vntextpatch", checks, suggestions, required=False)
+        _check_managed_tool("vntextproxy", checks, suggestions, required=False)
+        available_static_tools = [
+            check["name"] for check in checks
+            if check["name"] in {
+                "tool:garbro_console",
+                "tool:msg_tool",
+                "tool:vntextpatch",
+            }
+            and check["status"] == "ok"
+        ]
+        checks.append({
+            "name": "krkr_static_components",
+            "status": "ok" if available_static_tools else "missing",
+            "required": False,
+            "detail": ", ".join(available_static_tools) if available_static_tools else "未找到可选 KRKR 静态组件",
+        })
+        if not available_static_tools:
+            suggestions.append("当前安装包缺少 KRKR 静态组件；可以改用实时翻译，或重新安装完整包。")
 
     if engine_name == "wolf":
         try:

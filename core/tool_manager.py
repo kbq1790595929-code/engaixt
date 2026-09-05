@@ -36,6 +36,16 @@ class ToolSpec:
     notes: str = ""
     min_size: int = 1
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    version: str = ""
+    source_url: str = ""
+    license: str = ""
+    license_url: str = ""
+    sha256: str = ""
+    engine_scope: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
+    bundled_relative_path: str = ""
+    command_template: tuple[str, ...] = ()
+    output_contract: tuple[str, ...] = ()
 
 
 _GITHUB_UA = "game-translator-tool/1.0"
@@ -134,6 +144,15 @@ _KNOWN_TOOLS: dict[str, ToolSpec] = {
         homepage="https://github.com/crskycode/GARbro",
         notes="Modern GARbro command-line executable. Required for automatic protected XP3 extraction.",
         min_size=10_000_000,
+        version="managed",
+        source_url="https://github.com/crskycode/GARbro",
+        license="MIT",
+        license_url="https://github.com/morkt/GARbro/blob/master/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("archive_list", "archive_extract"),
+        bundled_relative_path="_internal/tools/kirikiri/garbro",
+        command_template=("{tool}", "{archive}"),
+        output_contract=("script_entries", "extracted_files"),
     ),
     "garbro_mod": ToolSpec(
         name="garbro_mod",
@@ -144,6 +163,15 @@ _KNOWN_TOOLS: dict[str, ToolSpec] = {
         homepage="https://github.com/crskycode/GARbro",
         notes="GARbro Mod build with newer visual-novel archive schemes, including protected KiriKiri/YUZUSOFT XP3 variants.",
         min_size=10_000_000,
+        version="managed",
+        source_url="https://github.com/crskycode/GARbro",
+        license="MIT",
+        license_url="https://github.com/morkt/GARbro/blob/master/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("archive_list", "archive_extract"),
+        bundled_relative_path="_internal/tools/kirikiri/garbro",
+        command_template=("{tool}", "{archive}"),
+        output_contract=("script_entries", "extracted_files"),
     ),
     "garbro_gui": ToolSpec(
         name="garbro_gui",
@@ -189,6 +217,15 @@ _KNOWN_TOOLS: dict[str, ToolSpec] = {
         homepage="https://github.com/arcusmaximus/KirikiriTools",
         notes="Creates unencrypted XP3 archives accepted by the KirikiriTools version.dll bridge.",
         min_size=5_000,
+        version="1.7",
+        source_url="https://github.com/arcusmaximus/KirikiriTools/releases/tag/1.7",
+        license="MIT",
+        license_url="https://github.com/arcusmaximus/KirikiriTools/blob/master/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("archive_pack",),
+        bundled_relative_path="_internal/tools/kirikiri/kirikiri_tools",
+        command_template=("{tool}", "{input_dir}", "{output_archive}"),
+        output_contract=("xp3_readable", "entry_count_match"),
     ),
     "kirikiri_unencrypted_version": ToolSpec(
         name="kirikiri_unencrypted_version",
@@ -197,6 +234,61 @@ _KNOWN_TOOLS: dict[str, ToolSpec] = {
         homepage="https://github.com/arcusmaximus/KirikiriTools",
         notes="KirikiriTools bridge DLL that lets games load unencrypted XP3 patches.",
         min_size=50_000,
+        version="1.7",
+        source_url="https://github.com/arcusmaximus/KirikiriTools/releases/tag/1.7",
+        license="MIT",
+        license_url="https://github.com/arcusmaximus/KirikiriTools/blob/master/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("xp3_bridge", "sjis_compatibility"),
+        bundled_relative_path="_internal/tools/kirikiri/kirikiri_tools",
+        output_contract=("manifest_owned", "rollback_safe"),
+    ),
+    "vntextpatch": ToolSpec(
+        name="vntextpatch",
+        executable_names=("VNTextPatch.exe", "VNTextPatch"),
+        github_repo="arcusmaximus/VNTranslationTools",
+        homepage="https://github.com/arcusmaximus/VNTranslationTools",
+        notes="备用 KRKR KS/SCN 脚本提取、导入、角色名和 SJIS tunnel 适配器。",
+        version="source-built",
+        source_url="https://github.com/arcusmaximus/VNTranslationTools",
+        license="MIT",
+        license_url="https://github.com/arcusmaximus/VNTranslationTools/blob/main/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("script_export", "script_import", "speaker_names", "sjis_tunnel", "word_wrap"),
+        bundled_relative_path="_internal/tools/kirikiri/vntextpatch",
+        command_template=("{tool}", "extractlocal", "{input_dir}", "{output_dir}"),
+        output_contract=("text_items", "speaker_roles", "script_round_trip"),
+    ),
+    "vntextproxy": ToolSpec(
+        name="vntextproxy",
+        executable_names=("VNTextProxy.dll",),
+        github_repo="arcusmaximus/VNTranslationTools",
+        homepage="https://github.com/arcusmaximus/VNTranslationTools",
+        notes="KRKR 静态 SJIS tunnel 的显示层代理，仅在原生显示层不适用时启用。",
+        version="source-built",
+        source_url="https://github.com/arcusmaximus/VNTranslationTools",
+        license="MIT",
+        license_url="https://github.com/arcusmaximus/VNTranslationTools/blob/main/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("sjis_tunnel_decode", "font_compatibility", "locale_compatibility"),
+        bundled_relative_path="_internal/tools/kirikiri/vntextproxy",
+        output_contract=("sjis_ext_bin", "single_display_backend"),
+    ),
+    "msg_tool": ToolSpec(
+        name="msg_tool",
+        executable_names=("msg_tool.exe", "msg-tool.exe", "msg_tool", "msg-tool"),
+        github_repo="lifegpc/msg-tool",
+        homepage="https://github.com/lifegpc/msg-tool",
+        notes="KRKR KS/SCN/TJS2/XP3 的第二备用导出、导入和封包工具。",
+        version="source-built",
+        source_url="https://github.com/lifegpc/msg-tool",
+        license="GPL-3.0",
+        license_url="https://github.com/lifegpc/msg-tool/blob/master/LICENSE",
+        engine_scope=("kirikiri",),
+        capabilities=("archive_unpack", "archive_pack", "script_export", "script_import"),
+        bundled_relative_path="_internal/tools/kirikiri/msg_tool",
+        command_template=("{tool}", "unpack", "{archive}", "{output_dir}"),
+        output_contract=("script_files", "archive_round_trip", "exit_code_not_sufficient"),
     ),
     "unrealpak": ToolSpec(
         name="unrealpak",
@@ -251,6 +343,13 @@ _ALIASES = {
     "xp3pack": "kirikiri_xp3pack",
     "xp3pack.exe": "kirikiri_xp3pack",
     "kirikiri_version": "kirikiri_unencrypted_version",
+    "vntextpatch": "vntextpatch",
+    "vntextpatch.exe": "vntextpatch",
+    "vntextproxy": "vntextproxy",
+    "vntextproxy.dll": "vntextproxy",
+    "msg-tool": "msg_tool",
+    "msg_tool": "msg_tool",
+    "msg-tool.exe": "msg_tool",
     "7z": "7zip",
     "7za": "7zip",
     "7zip.exe": "7zip",
@@ -276,6 +375,15 @@ def get_project_tools_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "tools"
 
 
+def get_bundled_tools_dir() -> Path:
+    """Return tools shipped inside a source checkout or frozen package."""
+    try:
+        from core.resources import resource_path
+        return resource_path("_internal", "tools")
+    except Exception:
+        return Path(__file__).resolve().parent.parent / "_internal" / "tools"
+
+
 def get_manifest_path() -> Path:
     return get_tools_dir() / "manifest.json"
 
@@ -284,6 +392,7 @@ def list_tool_dirs() -> list[Path]:
     """Return search roots, ordered from user-configured to bundled tools."""
     roots = [
         get_tools_dir(),
+        get_bundled_tools_dir(),
         get_project_tools_dir(),
         Path(__file__).resolve().parent.parent / "downloads",
     ]

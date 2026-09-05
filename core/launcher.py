@@ -13,6 +13,10 @@ import time
 from pathlib import Path
 from config import get_config
 from core.exe_selector import find_main_exe
+from core.kirikiri_launcher_policy import (
+    has_active_kirikiri_root_patch,
+    kirikiri_needs_patch_bridge,
+)
 from core.path_resolver import resolve_game_path
 from core.resources import app_root, resource_path
 from utils.logger import info, warning, debug
@@ -84,7 +88,11 @@ def launch_translated_launcher(launcher: Path, cwd: Path | None = None, hidden: 
         suffix = launcher.suffix.lower()
         if suffix in {".bat", ".cmd"}:
             comspec = os.environ.get("ComSpec") or "cmd.exe"
-            cmd = [comspec, "/d", "/c", "call", str(launcher)]
+            # ``cmd`` treats parentheses in an unquoted batch path as control
+            # syntax. Keep the path quoted because game folders commonly use
+            # release names such as ``(18禁ゲーム) ...``.
+            quoted_launcher = '"' + str(launcher).replace('"', '\\"') + '"'
+            cmd = [comspec, "/d", "/c", "call", quoted_launcher]
         elif suffix == ".ps1":
             cmd = [
                 "powershell.exe",
@@ -316,38 +324,10 @@ def create_kirikiri_native_launcher(game_path: Path, engine: object | None = Non
 
     if not _is_pe_x86(exe_path):
         warning(f"KiriKiri native launcher skipped: {exe_path.name} is not a 32-bit PE executable")
-        if not bool(getattr(get_config(), "kirikiri_enable_static_patch", False)):
-            return None
-        krkrpatch_loader = game_dir / "KrkrPatchLoader.exe"
-        krkrpatch_config = game_dir / "KrkrPatch.json"
-        krkrpatch_dll = game_dir / "KrkrPatch.dll"
-        if (
-            krkrpatch_loader.exists()
-            and krkrpatch_config.exists()
-            and krkrpatch_dll.exists()
-            and _kirikiri_needs_patch_bridge(game_dir)
-        ):
-            launcher = _write_krkrpatch_launcher(game_dir, exe_rel, krkrpatch_loader)
-            info(f"KiriKiri KrkrPatch launcher written: {launcher}")
-            return launcher
         return None
 
     native_launcher = _prepare_native_kirikiri_runtime(game_dir, checkpoint)
     if not native_launcher:
-        if not bool(getattr(get_config(), "kirikiri_enable_static_patch", False)):
-            return None
-        krkrpatch_loader = game_dir / "KrkrPatchLoader.exe"
-        krkrpatch_config = game_dir / "KrkrPatch.json"
-        krkrpatch_dll = game_dir / "KrkrPatch.dll"
-        if (
-            krkrpatch_loader.exists()
-            and krkrpatch_config.exists()
-            and krkrpatch_dll.exists()
-            and _kirikiri_needs_patch_bridge(game_dir)
-        ):
-            launcher = _write_krkrpatch_launcher(game_dir, exe_rel, krkrpatch_loader)
-            info(f"KiriKiri KrkrPatch launcher written: {launcher}")
-            return launcher
         return None
     launcher = _write_native_kirikiri_launcher(game_dir, exe_rel, native_launcher, engine=engine)
     info(f"KiriKiri 汉化启动器已生成: {launcher}")
@@ -430,17 +410,7 @@ def create_godot_display_hook_launcher(game_path: Path, engine: object | None = 
 
 
 def _kirikiri_needs_patch_bridge(game_dir: Path) -> bool:
-    diag_path = game_dir / "_translation_meta" / "kirikiri_patch_diagnostics.json"
-    if not diag_path.exists():
-        return True
-    try:
-        data = json.loads(diag_path.read_text(encoding="utf-8-sig"))
-    except Exception as exc:
-        debug(f"KiriKiri patch diagnostics read failed: {exc}")
-        return True
-    if bool(data.get("root_patch")) and not bool(data.get("needs_patch_bridge")):
-        return False
-    return True
+    return kirikiri_needs_patch_bridge(game_dir)
 
 
 def _kirikiri_native_hook_profile(game_dir: Path) -> str:
@@ -670,7 +640,17 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
     no_window_timeout = max(10, min(300, int(getattr(get_config(), "kirikiri_no_window_timeout_seconds", 45) or 45)))
     capture_hooks_for_bat = "zx,embed,z2,kr2"
     hook_profile = _kirikiri_native_hook_profile(game_dir)
-    use_overlay = hook_profile == "display"
+    # Static root patches already replace the game scripts. Keep the native
+    # launcher for its font compatibility behavior, but do not add the
+    # realtime second window on top of an already translated game.
+    use_overlay = hook_profile == "display" and not has_active_kirikiri_root_patch(game_dir)
+    patch_loader_rel = "KrkrPatchLoader.exe"
+    use_patch_bridge_loader = (
+        hook_profile == "patchstream"
+        and (game_dir / "KrkrPatchLoader.exe").is_file()
+        and (game_dir / "KrkrPatch.dll").is_file()
+        and (game_dir / "KrkrPatch.json").is_file()
+    )
     ps_lines = [
         "$ErrorActionPreference = 'Stop'",
         "$GameDir = [Environment]::GetEnvironmentVariable('KIRIKIRI_GAME_DIR', 'Process')",
@@ -678,6 +658,7 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         "$GameDir = [System.IO.Path]::GetFullPath($GameDir)",
         "Set-Location -LiteralPath $GameDir",
         f"$NativeLauncher = Join-Path $GameDir {_ps_quote(native_rel)}",
+        f"$PatchBridgeLoader = Join-Path $GameDir {_ps_quote(patch_loader_rel)}",
         f"$Exe = Join-Path $GameDir {_ps_quote(exe_rel)}",
         f"$OverlayExe = {_ps_quote(overlay_exe)}",
         f"$OverlayCwd = {_ps_quote(overlay_cwd)}",
@@ -685,6 +666,7 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         f"$OverlayNeedsPythonPath = {'$true' if overlay_needs_pythonpath else '$false'}",
         f"$NoWindowTimeout = {no_window_timeout}",
         f"$UseOverlay = {'$true' if use_overlay else '$false'}",
+        f"$UsePatchBridgeLoader = {'$true' if use_patch_bridge_loader else '$false'}",
         "$OverlayStartLog = Join-Path $GameDir '_translation_meta\\kirikiri_overlay_start.log'",
         "$GameName = Split-Path -Leaf $GameDir",
         "$GameExeName = [System.IO.Path]::GetFileName($Exe)",
@@ -719,13 +701,18 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         "function GetGameProcessInfo {",
         "  Get-CimInstance Win32_Process -Filter (\"name='\" + $GameExeName.Replace(\"'\", \"''\") + \"'\") | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $Exe) } | Select-Object -First 1",
         "}",
-        "function HasVisibleGameWindow([int]$Pid) {",
-        "  $p = Get-Process -Id $Pid -ErrorAction SilentlyContinue",
+        "function HasVisibleGameWindow([int]$ProcessId) {",
+        "  $p = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue",
         "  if (-not $p) { return $false }",
         "  $p.Refresh()",
         "  return ([IntPtr]$p.MainWindowHandle -ne [IntPtr]::Zero)",
         "}",
-        "if (-not (Test-Path -LiteralPath $NativeLauncher)) { Fail ('KiriKiri native launcher not found: ' + $NativeLauncher) }",
+        "if (-not $UsePatchBridgeLoader -and -not (Test-Path -LiteralPath $NativeLauncher)) { Fail ('KiriKiri native launcher not found: ' + $NativeLauncher) }",
+        "if ($UsePatchBridgeLoader) {",
+        "  if (-not (Test-Path -LiteralPath $PatchBridgeLoader)) { Fail ('KrkrPatchLoader not found: ' + $PatchBridgeLoader) }",
+        "  if (-not (Test-Path -LiteralPath (Join-Path $GameDir 'KrkrPatch.dll'))) { Fail 'KrkrPatch.dll not found.' }",
+        "  if (-not (Test-Path -LiteralPath (Join-Path $GameDir 'KrkrPatch.json'))) { Fail 'KrkrPatch.json not found.' }",
+        "}",
         "if (-not (Test-Path -LiteralPath $Exe)) { Fail ('Game executable not found: ' + $Exe) }",
         f"$env:KIRIKIRI_NATIVE_HOOK_PROFILE = '{hook_profile}'",
         f"$env:KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE = '{'1' if use_overlay else '0'}'",
@@ -736,8 +723,13 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         "$overlayExitLogged = $false",
         "$QuotedExe = '\"' + $Exe.Replace('\"', '\\\"') + '\"'",
         "$psi = [System.Diagnostics.ProcessStartInfo]::new()",
-        "$psi.FileName = $NativeLauncher",
-        "$psi.Arguments = $QuotedExe + ' --wait'",
+        "if ($UsePatchBridgeLoader) {",
+        "  $psi.FileName = $PatchBridgeLoader",
+        "  $psi.Arguments = ''",
+        "} else {",
+        "  $psi.FileName = $NativeLauncher",
+        "  $psi.Arguments = $QuotedExe + ' --wait'",
+        "}",
         "$psi.WorkingDirectory = $GameDir",
         "try {",
         "  $proc = [System.Diagnostics.Process]::Start($psi)",

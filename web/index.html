@@ -205,6 +205,9 @@
           <button class="btn btn-primary actions-btn" onclick="startRealtime()">
             <svg class="ic"><use href="#i-activity"/></svg>实时翻译
           </button>
+          <button class="btn actions-btn" id="krkr-fallback-btn" onclick="startRealtime()" hidden disabled>
+            <svg class="ic"><use href="#i-activity"/></svg>改用实时翻译
+          </button>
           <button class="btn actions-btn" onclick="extractOnly()">
             <svg class="ic"><use href="#i-download"/></svg>仅提取
           </button>
@@ -432,7 +435,7 @@
           <li><span>拖入游戏目录、游戏 exe、Steam 快捷方式或压缩包；工具会先解析真实目录，再进行引擎识别。</span></li>
           <li><span>查看识别出的引擎和候选结果。普通用户保持“注入方式：自动”即可，管线会按引擎选择静态回填或运行时注入。</span></li>
           <li><span>普通可回填引擎点击“开始翻译”。流程会依次执行提取文本、缓存命中、AI 翻译、校验、回填、生成启动器和写入诊断数据。</span></li>
-          <li><span>KRKR、Unity / XUnity 和 Unity @ARCH000 只能点击“实时翻译”；点击“开始翻译”会弹出提示，不会进入静态流程。</span></li>
+          <li><span>KRKR 点击“开始翻译”会先走静态预检、解包、提取、翻译和安全回填；静态阶段失败时会保留原文件，并提供“改用实时翻译”。Unity / XUnity 继续使用“实时翻译”。</span></li>
           <li><span>完成后优先从“游戏库”启动；也可以进入游戏目录，运行管线生成的汉化启动器或原游戏 exe。</span></li>
         </ol>
       </section>
@@ -446,7 +449,7 @@
           </div>
           <div class="help-note">
             <strong>实时翻译</strong>
-            <span>KRKR 和 Unity 的唯一入口。KRKR 会启动原生 hook 与独立字幕窗口；Unity 会部署 XUnity / BepInEx 运行时翻译。</span>
+            <span>运行时后备入口。KRKR 静态流程失败后可由用户确认启动原生 hook 与独立字幕窗口；Unity 会部署 XUnity / BepInEx 运行时翻译。</span>
           </div>
           <div class="help-note">
             <strong>仅提取</strong>
@@ -613,10 +616,10 @@
               <span class="help-status beta">Beta 版</span>
             </div>
             <dl class="engine-help-facts">
-              <div><dt>默认流程</dt><dd>只能点击“实时翻译”。工具按 LunaTranslator 思路走原生 hook，捕获 KAGParser 等显示文本，并在独立字幕窗口显示中文。</dd></div>
+              <div><dt>默认流程</dt><dd>“开始翻译”先执行静态预检、XP3 解包、脚本提取、AI 翻译和安全回填；静态失败时保留原文件，并准备“改用实时翻译”。</dd></div>
               <div><dt>显示方式</dt><dd>人名和正文分通道处理；已有译文优先读本地映射，新文本可实时补译，并写入 <code>_translation_meta</code> 供后续复用。</dd></div>
               <div><dt>启动</dt><dd>GUI 实时翻译会直接拉起 native runtime 和字幕窗口，不再经过 bat / PowerShell。目录里的 <code>启动汉化版.bat</code> 只是便携备用入口。</dd></div>
-              <div><dt>静态脚本</dt><dd><code>.ks</code>、<code>.tjs</code>、普通 XP3 / SCN 的提取能力保留为辅助诊断和后续补翻基础，不再作为 KRKR 默认翻译入口。</dd></div>
+              <div><dt>静态脚本</dt><dd><code>.ks</code>、<code>.tjs</code>、普通 XP3 / SCN 优先使用内置解析器，失败时按顺序尝试 GARbro、msg-tool 和 VNTextPatch。每个工具都在隔离工作区运行，只有通过产物检查才进入后续阶段。</dd></div>
             </dl>
           </section>
 
@@ -769,6 +772,7 @@
           开启缓存会更便宜；翻译的游戏越多，跨游戏常见文本、人名、选项和 UI 命中越多，长期越省钱。
         </div>
       </div>
+      <div class="field"><label class="switch"><input type="checkbox" name="selection_preflight_enabled"><span class="track"></span><span class="sw-label">选择游戏后自动预检并显示预估费用</span></label><div class="settings-note">预检只解包、提取和计数，不翻译、不扣费；关闭后点击开始翻译会直接进入正常提取流程。</div></div>
       <div class="field-grid">
         <div class="field">
           <label class="switch">
@@ -986,5 +990,6 @@
 <script src="local_model_settings.js"></script>
 <script src="usage_statistics.js"></script>
 <script src="app.js"></script>
+<script src="preflight_settings.js"></script>
 </body>
 </html>

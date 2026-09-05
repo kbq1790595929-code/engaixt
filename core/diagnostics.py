@@ -70,6 +70,23 @@ class Diagnostics:
         self.data.setdefault("errors", []).append(entry)
         self.save()
 
+    def record_stage_failure(self, failure: dict[str, Any]):
+        """Store one structured failure while keeping legacy error entries."""
+        payload = _jsonable(failure, key="failure")
+        self.data["failure"] = payload
+        self.error(
+            str(failure.get("user_message") or "pipeline stage failed"),
+            stage=failure.get("stage", ""),
+            code=failure.get("code", ""),
+            technical_detail=failure.get("technical_detail", ""),
+            fallback=failure.get("fallback", ""),
+            actions=failure.get("actions", []),
+            rollback=failure.get("rollback", False),
+        )
+        for action in failure.get("next_actions", []) or []:
+            self.suggest(str(action))
+        self.save()
+
     def record_exception(self, message: str, exc: BaseException, **details: Any):
         """记录异常事实：类型、消息、完整调用栈（黑匣子核心字段之一）。"""
         try:
