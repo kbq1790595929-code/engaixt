@@ -17,6 +17,10 @@ class HyMt2ModelSpec:
 
 _MODELSCOPE_ROOT = "https://www.modelscope.cn/models/Tencent-Hunyuan"
 
+# 自训模型与底模不在同一个 ModelScope 账号下，单独给出根地址，
+# 避免把它拼到上面那个已含账号名的常量后面。
+_ENGAIXT_MODEL_ROOT = "https://www.modelscope.cn/models/ENGAOXT/EngAixt-7B-GGUF/resolve/master"
+
 MODEL_SPECS: dict[str, HyMt2ModelSpec] = {
     "Hy-MT2-1.8B-Q4_K_M": HyMt2ModelSpec(
         name="Hy-MT2-1.8B-Q4_K_M",
@@ -56,6 +60,22 @@ MODEL_SPECS: dict[str, HyMt2ModelSpec] = {
         ),
         license_url=f"{_MODELSCOPE_ROOT}/Hy-MT2-7B-GGUF/resolve/master/LICENSE.txt",
         description="约 7.4 GB，译文质量更高；建议使用至少 12 GB 显存的 NVIDIA GPU。",
+    ),
+    "EngAixt-7B-Q4_K_M": HyMt2ModelSpec(
+        name="EngAixt-7B-Q4_K_M",
+        label="EngAixt 7B（自训 · 控制符强化版）",
+        filename="EngAixt-7B-Q4_K_M.gguf",
+        size=4_624_648_800,
+        sha256="4f8aeb8e0a41e6c0e8438686863fd9f7af390d4c8c2a1c8cb1e38b45a659c551",
+        source_url=_ENGAIXT_MODEL_ROOT + "/EngAixt-7B-Q4_K_M.gguf",
+        license_url=_ENGAIXT_MODEL_ROOT + "/EngAixt-7B-LICENSE.txt",
+        description=(
+            "约 4.3 GB，基于腾讯混元 Hy-MT2-7B（Apache 2.0）自训的日译中文本模型，"
+            "控制符保护与 EngAixt 生产链路同格式。"
+            "真实游戏文本全量 4,239 行实测（batch 20）：整批 JSON 契约 212/212 正确，"
+            "控制符保留 99.71%（语义类 99.17%），空译文 0，日文残留 38 条。"
+            "仅训练日译中；建议 8 GB 以上显存。"
+        ),
     ),
 }
 
