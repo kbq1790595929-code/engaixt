@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from translators.hy_mt2_models import (
     DEFAULT_MODEL_NAME,
@@ -483,6 +483,22 @@ def remove_component(model_name: str | None = None) -> dict:
     return component_status(selected.name)
 
 
+def _response_resumed_from(response: Any, offset: int) -> bool:
+    """判断响应是否真的从请求的偏移量开始返回。
+
+    标准做法是 HTTP 206，但部分 CDN / 对象存储（例如 ModelScope）会返回 200
+    同时给出正确的 Content-Range，并只发送请求的那一段。只看 206 会把这种
+    情况误判为"服务器不支持续传"，于是丢弃已下载的分片从头再来。
+
+    反之，如果服务器忽略了 Range 并回传整个文件，Content-Range 会缺失或与
+    请求的偏移量不符 —— 这时必须重下，否则会把两份数据拼成损坏的文件。
+    """
+    content_range = str(response.headers.get("Content-Range") or "").strip()
+    if content_range:
+        return content_range.startswith(f"bytes {offset}-")
+    return getattr(response, "status", 200) == 206
+
+
 def _download(
     url: str,
     destination: Path,
@@ -510,7 +526,8 @@ def _download(
         headers["Range"] = f"bytes={offset}-"
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=120) as response:
-        if offset and getattr(response, "status", 200) != 206:
+        if offset and not _response_resumed_from(response, offset):
+            # 服务器没有从请求的偏移量开始返回，已有分片不可信，必须重下
             offset = 0
             part.unlink(missing_ok=True)
         mode = "ab" if offset else "wb"
