@@ -121,6 +121,7 @@ class Config:
     tool_update_interval_hours: int = DEFAULT_TOOL_UPDATE_INTERVAL_HOURS  # 自动更新检查间隔；默认5天
     auto_launch: bool = True  # 翻译完成后自动启动游戏
     ui_accent: str = "#8b7cff"  # UI 主色调
+    ui_theme: str = "dark"  # UI 主题：dark / light
     bg_color: str = "#08080d"  # UI 背景色
     bg_image: str = ""  # UI 背景图片路径
     ref_tool_dir: str = ""  # 参考工具 trans/ 目录（BepInEx/XUAT 变体打包来源，空则用默认路径）

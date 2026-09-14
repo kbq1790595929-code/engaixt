@@ -1,4 +1,4 @@
-﻿function on_meta(key, val) {
+function on_meta(key, val) {
     if (key === "stage_failure") {
         const failure = (val && typeof val === "object") ? val : {};
         const message = String(failure.user_message || t("当前阶段执行失败"));
@@ -851,6 +851,11 @@ function installEditableContextMenu() {
 async function loadSettings() {
     const c = await pywebview.api.get_config();
     if (c.ui_language) setUiLanguage(c.ui_language, true);
+    if (c.ui_theme) {
+        applyTheme(c.ui_theme, { initial: true });
+    } else {
+        syncThemeUi();
+    }
     for (const [key, val] of Object.entries(c)) {
         document.querySelectorAll(`[name="${key}"]`).forEach(el => {
             setFormControlValue(el, val);
@@ -864,7 +869,12 @@ async function loadSettings() {
             updateCoverage(coverageEl);
         }
     }
-    if (c.bg_color) {
+    // 配置里的颜色可能是另一套主题的出厂默认值（用户从没改过），
+    // 那种情况下不要拿它去覆盖当前主题 —— 否则切到浅色主题会顶着一片黑底。
+    if (c.ui_accent && !isOtherThemeDefault(THEME_ACCENT_FACTORY, c.ui_accent)) {
+        applyAccent(c.ui_accent);
+    }
+    if (c.bg_color && !isOtherThemeDefault(THEME_BG_FACTORY, c.bg_color)) {
         document.getElementById("bg-picker").value = c.bg_color;
         setBgColor(c.bg_color);
     }
@@ -997,8 +1007,76 @@ async function applyBgImage(path) {
     }
 }
 
+// ── 主题 ──
+// 两套主题各自记住用户改过的背景色 / 主色调。某个值等于该主题的默认值时，
+// 就撤掉 inline 覆盖，把控制权交回 CSS 的 [data-theme] 令牌块 ——
+// 那里定义的立体层次（--ridge / --raise / --surface-*）比 JS 推算的更精确。
+var THEME_BG = { dark: "#08080d", light: "#edf1f5" };
+var THEME_ACCENT = { dark: "#8b7cff", light: "#1769b0" };
+// 出厂默认值，运行期不会被改写；用来识别"旧配置里存的是另一套主题的默认色"
+var THEME_BG_FACTORY = { dark: "#08080d", light: "#edf1f5" };
+var THEME_ACCENT_FACTORY = { dark: "#8b7cff", light: "#1769b0" };
+
+function isOtherThemeDefault(map, hex) {
+    var cur = currentTheme();
+    var v = (hex || "").toLowerCase();
+    return Object.keys(map).some(function (t) { return t !== cur && map[t] === v; });
+}
+
+var THEME_TOKEN_VARS = ["--bg-0", "--bg-1", "--bg-card", "--hover-bg",
+    "--border", "--border-hi", "--text-hi", "--text", "--text-dim"];
+var ACCENT_VARS = ["--accent", "--accent-r", "--accent-g", "--accent-b", "--accent-l",
+    "--accent-2", "--accent-2-r", "--accent-2-g", "--accent-2-b",
+    "--accent-lt-r", "--accent-lt-g", "--accent-lt-b",
+    "--aurora-1", "--aurora-2", "--aurora-3", "--gradient"];
+
+function currentTheme() {
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function resetThemeTokens() {
+    var s = document.documentElement.style;
+    THEME_TOKEN_VARS.forEach(function (k) { s.removeProperty(k); });
+}
+
+function syncThemeUi() {
+    var t = currentTheme();
+    var hidden = document.getElementById("theme-input");
+    if (hidden) hidden.value = t;
+    ["dark", "light"].forEach(function (n) {
+        var el = document.getElementById("theme-opt-" + n);
+        if (el) el.classList.toggle("on", n === t);
+    });
+}
+
+function applyTheme(name, opts) {
+    opts = opts || {};
+    var next = name === "light" ? "light" : "dark";
+    var picker = document.getElementById("bg-picker");
+    var accentPicker = document.getElementById("accent-picker");
+    if (!opts.initial) {
+        // 记住当前主题下的自定义配色，切回来时还原
+        var prev = currentTheme();
+        if (picker && picker.value) THEME_BG[prev] = picker.value.toLowerCase();
+        if (accentPicker && accentPicker.value) THEME_ACCENT[prev] = accentPicker.value.toLowerCase();
+    }
+    document.documentElement.dataset.theme = next;
+    if (picker) picker.value = THEME_BG[next];
+    if (accentPicker) accentPicker.value = THEME_ACCENT[next];
+    setBgColor(THEME_BG[next]);
+    applyAccent(THEME_ACCENT[next]);
+    syncThemeUi();
+}
+
 function setBgColor(hex) {
     var root = document.documentElement;
+    // 只有等于"出厂默认值"时才交还 CSS。必须比对 THEME_BG_FACTORY：
+    // applyTheme 会把用户自定义色回写到 THEME_BG[prev]，拿运行时表去比对，
+    // 用户的自定义色就会被误判成主题默认，导致色板显示黑、背景却用默认值。
+    if ((hex || "").toLowerCase() === THEME_BG_FACTORY[currentTheme()]) {
+        resetThemeTokens();
+        return;
+    }
     root.style.setProperty("--bg-0", hex);
     var r = parseInt(hex.slice(1,3), 16);
     var g = parseInt(hex.slice(3,5), 16);
@@ -1041,6 +1119,12 @@ function applyPreset(hex) {
 
 function applyAccent(hex) {
     if (!hex || hex.length < 7) hex = "#8b7cff";
+    // 同理：只跟出厂默认值比对（浅色主题的 aurora 光斑是单独调过的）
+    if (hex.toLowerCase() === THEME_ACCENT_FACTORY[currentTheme()]) {
+        var st = document.documentElement.style;
+        ACCENT_VARS.forEach(function (k) { st.removeProperty(k); });
+        return;
+    }
     var r = parseInt(hex.slice(1,3), 16);
     var g = parseInt(hex.slice(3,5), 16);
     var b = parseInt(hex.slice(5,7), 16);
@@ -2013,9 +2097,17 @@ window.addEventListener("pywebviewready", function () {
     }
     pywebview.api.get_config().then(function (c) {
         if (c && c.ui_language) setUiLanguage(c.ui_language, true);
-        if (c && c.ui_accent) applyAccent(c.ui_accent);
-        if (c && c.bg_color) setBgColor(c.bg_color);
+        applyTheme((c && c.ui_theme) || currentTheme(), { initial: true });
+        if (c && c.ui_accent && !isOtherThemeDefault(THEME_ACCENT_FACTORY, c.ui_accent)) applyAccent(c.ui_accent);
+        if (c && c.bg_color && !isOtherThemeDefault(THEME_BG_FACTORY, c.bg_color)) setBgColor(c.bg_color);
         if (c && c.bg_image) { _bgImagePath = c.bg_image; applyBgImage(c.bg_image); }
     });
     if (_isStatisticsPageActive()) loadUsageStatistics(true);
 });
+
+// 首屏先把主题选中态摆正，不必等 pywebview 就绪
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", syncThemeUi);
+} else {
+    syncThemeUi();
+}
