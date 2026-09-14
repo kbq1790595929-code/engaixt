@@ -345,6 +345,7 @@ class Api:
 
             "auto_launch": c.auto_launch,
             "ui_accent": c.ui_accent,
+            "ui_theme": c.ui_theme,
             "bg_color": c.bg_color,
             "bg_image": c.bg_image,
             "kirikiri_runtime_completion_mode": c.kirikiri_runtime_completion_mode,

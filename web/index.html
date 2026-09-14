@@ -918,6 +918,27 @@
 
     <!-- 外观 -->
     <div class="tab-panel" id="tab-look">
+      <div class="field"><label>界面主题</label>
+        <div class="theme-row">
+          <button type="button" class="theme-opt" id="theme-opt-dark" onclick="applyTheme('dark')">
+            <span class="swatch sw-dark">
+              <i style="width:38%;background:#8b7cff"></i>
+              <i style="width:22%;background:#4cc9f0"></i>
+              <i style="width:14%;background:#ffffff33"></i>
+            </span>
+            <span class="t-name">暗夜极光</span>
+          </button>
+          <button type="button" class="theme-opt" id="theme-opt-light" onclick="applyTheme('light')">
+            <span class="swatch sw-light">
+              <i style="width:38%;background:#0ea5e9"></i>
+              <i style="width:22%;background:#0891b2"></i>
+              <i style="width:14%;background:#0f172a26"></i>
+            </span>
+            <span class="t-name">立体工业科技白</span>
+          </button>
+        </div>
+        <input type="hidden" name="ui_theme" id="theme-input" value="dark">
+      </div>
       <div class="field"><label>背景色</label><input type="color" name="bg_color" id="bg-picker" value="#08080d" onchange="setBgColor(this.value)"></div>
       <div class="field"><label>背景图片</label>
         <div class="input-row">
