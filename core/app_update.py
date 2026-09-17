@@ -22,7 +22,7 @@ from core.resources import app_root
 
 
 APP_NAME = "EngAixt"
-APP_VERSION = "1.1.11"
+APP_VERSION = "1.1.12"
 UPDATE_BASE_URL = "https://engaixt.com/updates"
 USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 HTTP_RETRIES = 4
@@ -1120,33 +1120,8 @@ try {{
     Log "backup to $backup"
     Get-ChildItem -LiteralPath $installDir -Force | Copy-Item -Destination $backup -Recurse -Force
 
-    $editionMarkers = @(
-        "edition.json",
-        "_internal\\edition.json",
-        "edition.txt",
-        "_internal\\edition.txt"
-    )
-    $preservedEditionMarkers = @{{}}
-    foreach ($relativeMarker in $editionMarkers) {{
-        $markerPath = Join-Path $installDir $relativeMarker
-        if (Test-Path -LiteralPath $markerPath) {{
-            $preservedEditionMarkers[$relativeMarker] = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($markerPath))
-            Log "preserved edition marker $relativeMarker"
-        }}
-    }}
-
     Log "copying update files"
     Copy-UpdateFiles $source $installDir
-
-    foreach ($relativeMarker in $preservedEditionMarkers.Keys) {{
-        $markerPath = Join-Path $installDir $relativeMarker
-        $markerDir = Split-Path -Parent $markerPath
-        if (-not (Test-Path -LiteralPath $markerDir)) {{
-            New-Item -ItemType Directory -Force -Path $markerDir | Out-Null
-        }}
-        [System.IO.File]::WriteAllBytes($markerPath, [System.Convert]::FromBase64String($preservedEditionMarkers[$relativeMarker]))
-        Log "restored edition marker $relativeMarker"
-    }}
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $versionMarkerPaths = @(

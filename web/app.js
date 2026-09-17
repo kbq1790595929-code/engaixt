@@ -490,8 +490,7 @@ async function openSupportLink(key) {
         } else {
             const fallback = {
                 official: "https://engaixt.com/",
-                feedback: "mailto:contact@example.com?subject=EngAixt%20%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88",
-                sponsor: "https://ifdian.net/a/engaixt",
+                feedback: "https://github.com/kbq1790595929-code/engaixt/issues/new",
             }[key];
             if (fallback) window.open(fallback, "_blank", "noopener");
         }

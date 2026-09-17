@@ -133,7 +133,6 @@ def run_cli(args: list[str]):
 
     parser = argparse.ArgumentParser(description="游戏翻译工具")
     parser.add_argument("path", nargs="?", help="游戏文件夹或压缩包路径")
-    parser.add_argument("--license-status", action="store_true", help="print edition/quota status and exit")
     parser.add_argument("--injector", choices=["xunity", "frida"], help="使用运行时注入器")
     parser.add_argument("--no-launch", action="store_true", help="不启动游戏")
     try:
@@ -159,14 +158,8 @@ def run_cli(args: list[str]):
                         help="使用 JSON 检查点管线（提取→翻译→回填，支持断点续传）")
 
     ns = parser.parse_args(args)
-    if ns.license_status:
-        import json
-        from core.trial_quota import trial_status
-
-        print(json.dumps(trial_status().to_dict(), ensure_ascii=False, indent=2))
-        return
     if not ns.path:
-        parser.error("path is required unless --license-status is used")
+        parser.error("path is required")
 
     setup_logger()
     from core.path_resolver import resolve_game_path

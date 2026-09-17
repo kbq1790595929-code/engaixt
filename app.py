@@ -22,8 +22,7 @@ _REALTIME_ONLY_ENGINE_NAMES = {"unity", "xunity_realtime", "unity_arch000_lua"}
 _UNITY_REALTIME_ENGINE_NAMES = {"unity", "xunity_realtime", "unity_arch000_lua"}
 _SUPPORT_LINKS = {
     "official": "https://engaixt.com/",
-    "feedback": "mailto:contact@example.com?subject=EngAixt%20%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88",
-    "sponsor": "https://ifdian.net/a/engaixt",
+    "feedback": "https://github.com/kbq1790595929-code/engaixt/issues/new",
 }
 
 

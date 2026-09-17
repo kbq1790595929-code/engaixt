@@ -41,7 +41,6 @@ def _write_translation_notice(game_path: Path, engine=None, *, mode: str = "") -
 本目录已由 EngAixt 完成翻译或汉化运行环境部署。
 
 官网地址：https://engaixt.com/
-爱发电主页：https://ifdian.net/a/engaixt
 
 处理信息：
 - 引擎/路线：{engine_label}
