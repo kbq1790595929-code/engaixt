@@ -35,3 +35,35 @@ tools/_downloads/
 
 # Local native build toolchains/caches
 native/toolchains/
+
+# Bundled third-party tool binaries. These are assembled at packaging time and
+# downloaded on demand at runtime by core.tool_manager, matching the intent
+# already stated in game-translator.spec ("the source tree intentionally does
+# not vendor third-party binaries by default"). Committing this tree put
+# ~109 MB of other people's binaries -- and GARbro's per-game format indexes --
+# into the repository.
+#
+# The small textual provenance records under it ARE tracked, because they are
+# source rather than artifacts: components.json is the version/source/license/
+# sha256 manifest for every KiriKiri sidecar, and msg_tool's notice pair is
+# required by its GPL-3.0 license. Whitelisting is deliberate -- a new binary
+# dropped in here will not be committed by accident.
+_internal/tools/*
+!_internal/tools/kirikiri/
+_internal/tools/kirikiri/*
+!_internal/tools/kirikiri/components.json
+!_internal/tools/kirikiri/README.md
+!_internal/tools/kirikiri/msg_tool/
+_internal/tools/kirikiri/msg_tool/*
+!_internal/tools/kirikiri/msg_tool/LICENSE-GPL-3.0.txt
+!_internal/tools/kirikiri/msg_tool/SOURCE.txt
+
+# _internal/licenses is deliberately NOT ignored: it holds the MIT and GPL-3.0
+# texts that must ship alongside those binaries, and game-translator.spec
+# copies it into the distribution. Source input, not a build artifact.
+
+# Debug symbols: never ship these.
+*.pdb
+*.ilk
+*.exp
+*.lib

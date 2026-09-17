@@ -71,10 +71,3 @@ def translator_api_key(name: str | None, config) -> str:
     if str(name or "").lower() == "anthropic":
         return str(getattr(config, "anthropic_api_key", "") or "")
     return ""
-
-
-def translator_uses_trial_quota(name: str | None) -> bool:
-    cls = get_translator_class(name)
-    if not cls:
-        return True
-    return bool(getattr(cls, "USES_TRIAL_QUOTA", True))

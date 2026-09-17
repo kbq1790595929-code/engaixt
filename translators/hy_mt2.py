@@ -40,7 +40,6 @@ class HyMt2Translator(DeepSeekTranslator):
     REALTIME_PROMPT_VERSION = "hy_mt2_realtime_context_v3"
     MAX_INPUT_TOKENS = 3000
     MAX_MESSAGE_BATCH = 8
-    USES_TRIAL_QUOTA = False
 
     def __init__(self, runtime: HyMt2Runtime | None = None):
         self._runtime = runtime or get_runtime()
