@@ -1,0 +1,657 @@
+{
+  "version": 2,
+  "description": "Test-stage regression contracts for engine support. Fixtures must be synthetic or redistributable; commercial game files stay outside the repository.",
+  "sample_schema": {
+    "kinds": [
+      "synthetic",
+      "redistributable",
+      "manual",
+      "contract"
+    ],
+    "covers": [
+      "detect",
+      "extract",
+      "translate",
+      "repack",
+      "runtime",
+      "launcher",
+      "diagnostics",
+      "unsupported"
+    ]
+  },
+  "engines": {
+    "bgi": {
+      "status": "beta",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": true,
+        "creates_launcher": true,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "bgi-dsc-roundtrip-and-slot-patch",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_bgi_dsc.py"
+          ]
+        },
+        {
+          "id": "bgi-headerless-v1-choices",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_bgi_choices.py"
+          ]
+        },
+        {
+          "id": "bgi-native-portable-launcher",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "launcher",
+            "runtime"
+          ],
+          "tests": [
+            "tests/test_launcher.py::test_bgi_launcher_prefers_native_runtime_when_built"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_bgi_dsc.py",
+        "tests/test_bgi_choices.py",
+        "tests/test_launcher.py::test_bgi_launcher_prefers_native_runtime_when_built"
+      ],
+      "manual_smoke": [
+        "Verify translated BGI game starts through 启动汉化版.bat without Python or Frida.",
+        "Verify sjis_ext.bin and bgi_native_map.tsv are present under _translation_meta."
+      ]
+    },
+    "rpgmaker": {
+      "status": "stable",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": true,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "rpgmaker-xp-mkxp-detection",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "detect",
+            "runtime"
+          ],
+          "tests": [
+            "tests/test_rpgmaker_xp_mkxp.py"
+          ]
+        },
+        {
+          "id": "rpgmaker-json-and-event-text",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_text_extract.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_rpgmaker_xp_mkxp.py",
+        "tests/test_text_extract.py"
+      ],
+      "manual_smoke": [
+        "Verify MV/MZ JSON text and choices display translated text.",
+        "Verify XP/mkxp runtime hook still keeps font readable."
+      ]
+    },
+    "renpy": {
+      "status": "stable",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "renpy-rpy-dialogue-menu-variables",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_text_extract.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_text_extract.py"
+      ],
+      "manual_smoke": [
+        "Verify .rpy dialogue and menu options survive variable preservation."
+      ]
+    },
+    "xunity_realtime": {
+      "status": "stable",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": false,
+        "runtime_patch": true,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "xunity-launch-and-proxy-contract",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "runtime",
+            "launcher"
+          ],
+          "tests": [
+            "tests/test_launcher.py",
+            "tests/test_proxy_smoke.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_launcher.py",
+        "tests/test_proxy_smoke.py"
+      ],
+      "manual_smoke": [
+        "Verify a Unity game loads BepInEx/XUnity and displays cached translations."
+      ]
+    },
+    "unity": {
+      "status": "partial",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": true
+      },
+      "regression_samples": [
+        {
+          "id": "unity-loose-localization-text",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_text_extract.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_text_extract.py"
+      ],
+      "manual_smoke": [
+        "Verify direct Unity asset replacement only touches safe writable strings."
+      ]
+    },
+    "unity_arch000_lua": {
+      "status": "beta",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "unity-arch000-lua-capability-contract",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "detect",
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_engine_capabilities.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_engine_capabilities.py"
+      ],
+      "manual_smoke": [
+        "Verify @ARCH000 Lua archive extraction and repack on a known redistributable sample."
+      ]
+    },
+    "godot_pck": {
+      "status": "beta",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "godot-dialogic-dtl-story-and-choice",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_godot_pck_dtl.py",
+            "tests/test_godot_pck_choice_context.py"
+          ]
+        },
+        {
+          "id": "godot-binary-scn-res-strings",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_godot_pck_scn.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_godot_pck_dtl.py",
+        "tests/test_godot_pck_scn.py",
+        "tests/test_godot_pck_choice_context.py"
+      ],
+      "manual_smoke": [
+        "Verify opening DTL scene preserves event IDs and translated text appears in game."
+      ]
+    },
+    "godot_frida": {
+      "status": "beta",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": false,
+        "runtime_patch": true,
+        "creates_launcher": true,
+        "portable_after_patch": false,
+        "requires_python": true,
+        "requires_frida": true,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "godot-frida-runtime-dependency-contract",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "runtime",
+            "diagnostics"
+          ],
+          "tests": [
+            "tests/test_engine_capabilities.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_engine_capabilities.py"
+      ],
+      "manual_smoke": [
+        "Verify encrypted PCK runtime path still attaches and uses translation cache."
+      ]
+    },
+    "godot": {
+      "status": "partial",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "godot-plain-resource-text",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_godot_pck_dtl.py",
+            "tests/test_godot_pck_scn.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_godot_pck_dtl.py",
+        "tests/test_godot_pck_scn.py"
+      ],
+      "manual_smoke": [
+        "Verify unpacked Godot project resources can be translated and copied back."
+      ]
+    },
+    "gamemaker": {
+      "status": "partial",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": true,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "gamemaker-pe-data-string-slots",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_gamemaker_exe_strings.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_gamemaker_exe_strings.py"
+      ],
+      "manual_smoke": [
+        "Verify data.win extraction count is sane and safe-slot translations display."
+      ]
+    },
+    "tyrano": {
+      "status": "experimental",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "tyrano-loose-and-embedded-zip-roundtrip",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "detect",
+            "extract",
+            "repack",
+            "diagnostics"
+          ],
+          "tests": [
+            "tests/test_tyrano_engine.py"
+          ]
+        },
+        {
+          "id": "tyrano-nwjs-real-game-smoke",
+          "kind": "manual",
+          "automated": false,
+          "covers": [
+            "translate",
+            "repack",
+            "runtime"
+          ],
+          "tests": []
+        }
+      ],
+      "automated_tests": [
+        "tests/test_tyrano_engine.py"
+      ],
+      "manual_smoke": [
+        "Verify one owned NW.js Tyrano game completes DeepSeek translation, embedded ZIP verification, startup, and visible Chinese dialogue.",
+        "Keep support experimental until multiple independent Tyrano samples complete the same smoke test."
+      ]
+    },
+    "kirikiri": {
+      "status": "beta",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": true,
+        "creates_launcher": true,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": true
+      },
+      "regression_samples": [
+        {
+          "id": "kirikiri-v1-plain-script",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "detect",
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_kirikiri_engine.py"
+          ]
+        },
+        {
+          "id": "kirikiri-v1-xp3-patch",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "repack",
+            "diagnostics"
+          ],
+          "tests": [
+            "tests/test_kirikiri_engine.py"
+          ]
+        },
+        {
+          "id": "kirikiri-native-patch-launcher",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "launcher",
+            "runtime"
+          ],
+          "tests": [
+            "tests/test_launcher.py"
+          ]
+        },
+        {
+          "id": "kirikiri-v1-runtime-capture",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "runtime",
+            "translate",
+            "diagnostics"
+          ],
+          "tests": [
+            "tests/test_kirikiri_engine.py",
+            "tests/test_launcher.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_engine_capabilities.py",
+        "tests/test_kirikiri_engine.py",
+        "tests/test_launcher.py"
+      ],
+      "manual_smoke": [
+        "Verify XP3 extraction with GARbro.Console on a redistributable sample.",
+        "Verify 启动汉化版.bat starts the native KiriKiri display hook on a real x86 protected XP3 game without loading patch.xp3.",
+        "For protected XP3, use runtime capture to collect displayed text, rerun offline batch translation, and confirm checkpoint translations are displayed through the native hook."
+      ]
+    },
+    "unreal": {
+      "status": "partial",
+      "capabilities": {
+        "extract": true,
+        "repack": false,
+        "static_patch": false,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": false,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": true
+      },
+      "regression_samples": [
+        {
+          "id": "unreal-loose-localization-contract",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "extract",
+            "diagnostics"
+          ],
+          "tests": [
+            "tests/test_engine_capabilities.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_engine_capabilities.py"
+      ],
+      "manual_smoke": [
+        "Verify loose .po/.ini/.json localization resources are extracted; no automatic .uasset repack expected."
+      ]
+    },
+    "wolf": {
+      "status": "beta",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": true
+      },
+      "regression_samples": [
+        {
+          "id": "wolf-uberwolf-structured-pipeline",
+          "kind": "contract",
+          "automated": true,
+          "covers": [
+            "detect",
+            "extract",
+            "repack",
+            "diagnostics"
+          ],
+          "tests": [
+            "tests/test_wolf_engine.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_engine_capabilities.py",
+        "tests/test_wolf_engine.py"
+      ],
+      "manual_smoke": [
+        "Verify an UberWolf-supported encrypted archive extracts, translates, repacks, launches, and uninstalls cleanly."
+      ]
+    },
+    "generic": {
+      "status": "partial",
+      "capabilities": {
+        "extract": true,
+        "repack": true,
+        "static_patch": true,
+        "runtime_patch": false,
+        "creates_launcher": false,
+        "portable_after_patch": true,
+        "requires_python": false,
+        "requires_frida": false,
+        "needs_external_tool": false
+      },
+      "regression_samples": [
+        {
+          "id": "generic-plain-json-txt-csv",
+          "kind": "synthetic",
+          "automated": true,
+          "covers": [
+            "extract",
+            "repack"
+          ],
+          "tests": [
+            "tests/test_text_extract.py",
+            "tests/test_engine_capabilities.py"
+          ]
+        }
+      ],
+      "automated_tests": [
+        "tests/test_text_extract.py",
+        "tests/test_engine_capabilities.py"
+      ],
+      "manual_smoke": [
+        "Verify plain JSON/TXT/CSV files can be translated without touching skipped directories."
+      ]
+    }
+  }
+}

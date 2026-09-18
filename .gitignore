@@ -63,6 +63,22 @@ _internal/tools/kirikiri/msg_tool/*
 !_internal/tools/kirikiri/msg_tool/LICENSE-GPL-3.0.txt
 !_internal/tools/kirikiri/msg_tool/SOURCE.txt
 
+# The lora_dataset tooling is source, not a vendored binary: it is imported by
+# tests and by tools/build_lora_dataset.py. Everything else under tools/ is a
+# third-party project or binary (rpgmad and its Rust sources, RPGMakerDecrypter)
+# and stays out of the repository.
+tools/*
+!tools/lora_dataset/
+!tools/build_lora_dataset.py
+tools/lora_dataset/__pycache__/
+
+# Local KiriKiri probes: not shipped.
+# frida/kirikiri_realtime_hook.js is tracked explicitly (git add with its path,
+# not through an ignore exception) because the published test suite asserts on
+# its contents; .gitignore can only exclude, never include.
+frida/kirikiri_text_probe.js
+frida/probe_kirikiri_text.py
+
 # _internal/licenses is deliberately NOT ignored: it holds the MIT and GPL-3.0
 # texts that must ship alongside those binaries, and game-translator.spec
 # copies it into the distribution. Source input, not a build artifact.
