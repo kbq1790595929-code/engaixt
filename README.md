@@ -104,7 +104,7 @@ python app.py
 - **GARbro**、**KirikiriTools**（MIT）— KiriKiri 归档处理
 - **BepInEx**、**XUnity.AutoTranslator** — Unity 运行时翻译
 - **Source Han Sans**、**Noto Sans CJK**（SIL OFL 1.1）— 中文字体 fallback
-- KiriKiri 的 hook 路线参考了 LunaTranslator / LunaHook（GPLv3）。运行时部分是自己写的等价实现，没有复制它的代码。
+- KiriKiri 的 hook 路线按引擎自身的调用约定实现（KAGParser / TextRender / KiriKiriZ 系列签名与调用约定），以真实游戏运行结果验证；不复制任何第三方 hook 项目的源码。
 
 第三方工具的二进制在打包时组装，源码树里不带。
 
@@ -242,8 +242,10 @@ sources:
 - **GARbro**, **KirikiriTools** (MIT) — KiriKiri archive handling
 - **BepInEx**, **XUnity.AutoTranslator** — Unity runtime translation
 - **Source Han Sans**, **Noto Sans CJK** (SIL OFL 1.1) — CJK font fallback
-- The KiriKiri hook route references LunaTranslator / LunaHook (GPLv3). The runtime
-  part is an independently written equivalent; no code was copied from it.
+- The KiriKiri hook route is implemented against the engine's own calling
+  conventions (KAGParser / TextRender / KiriKiriZ signature and calling
+  contracts) and verified against real games. No third-party hook source is
+  copied into this project.
 
 Third-party tool binaries are assembled at packaging time; the source tree doesn't
 vendor them.

@@ -78,7 +78,7 @@ def run_gui():
 
 
 def run_realtime_cli(args: list[str]):
-    """实时翻译模式（LunaTranslator 风格）。
+    """实时翻译模式。
 
     用法:
       python main.py <game.exe> --realtime
@@ -127,7 +127,7 @@ def run_cli(args: list[str]):
     if args and args[0] == "--overlay-window":
         return run_overlay_window_cli(args[1:])
 
-    # 实时翻译模式（LunaTranslator 风格）—— 独立分支，提前拦截
+    # 实时翻译模式 —— 独立分支，提前拦截
     if "--realtime" in args:
         return run_realtime_cli(args)
 

@@ -22,8 +22,8 @@ struct Stats {
 };
 
 void Initialize(const std::wstring &gameDir, bool enabled, DWORD waitTimeoutMs, LogCallback logCallback);
-bool PassesLunaEmbedKrkrZFilter(const std::string &text);
-std::string NormalizeLunaEmbedKrkrZText(const std::string &text);
+bool PassesEmbedKrkrZFilter(const std::string &text);
+std::string NormalizeEmbedKrkrZText(const std::string &text);
 bool PassesEmbedKrkr2WideFilter(const std::wstring &text);
 const char *ResolveUtf8(
     const char *original,

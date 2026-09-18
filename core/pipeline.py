@@ -1521,8 +1521,8 @@ class Pipeline:
         return pipeline_detect_stage.select_engine(self, path)
 
     @staticmethod
-    def _try_luna_hints(path: Path):
-        return pipeline_detect_stage.try_luna_hints(path)
+    def _try_signature_hints(path: Path):
+        return pipeline_detect_stage.try_signature_hints(path)
 
     async def _fallback_realtime(self, path: Path, launch: bool) -> bool:
         """引擎检测失败时的兜底方案：用通用 Hook 捕获文本，字幕窗口显示译文。
