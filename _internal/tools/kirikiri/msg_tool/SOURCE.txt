@@ -1,0 +1,4 @@
+msg-tool 0.4.0-alpha.3
+Source: https://github.com/lifegpc/msg-tool
+Commit: 12773f356cdf0fb90d7da3c1d1aa1308b956b837
+License: GPL-3.0-or-later; see LICENSE-GPL-3.0.txt

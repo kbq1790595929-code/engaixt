@@ -41,7 +41,7 @@ def preflight_extract(
 
     A usable checkpoint is read without touching game assets. Otherwise the
     normal checkpoint pipeline runs in extract-only mode, which never calls a
-    translator, spends quota, patches files, or launches the game.
+    translator, spends API credit, patches files, or launches the game.
     """
     resolved = Path(resolve_game_path(input_path))
     if is_realtime_only_engine(engine_name):

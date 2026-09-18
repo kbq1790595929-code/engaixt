@@ -1,0 +1,90 @@
+{
+  "engine": "kirikiri",
+  "policy": "static_first_realtime_fallback",
+  "components": [
+    {
+      "name": "garbro_console",
+      "version": "GARbro-Mod-1.0.2.2",
+      "source_url": "https://github.com/crskycode/GARbro",
+      "license": "MIT",
+      "license_url": "https://github.com/morkt/GARbro/blob/master/LICENSE",
+      "sha256": "EC3BE4EB009564C991067387A1936EAA9D4956434ED13E41C4E09A71238CD1A5",
+      "bundled": true,
+      "bundled_relative_path": "_internal/tools/kirikiri/garbro",
+      "engine_scope": ["kirikiri"],
+      "capabilities": ["archive_list", "archive_extract"],
+      "command_template": ["{tool}", "{archive}"],
+      "output_contract": ["script_entries", "extracted_files"]
+    },
+    {
+      "name": "kirikiri_xp3pack",
+      "version": "1.7",
+      "source_url": "https://github.com/arcusmaximus/KirikiriTools/releases/tag/1.7",
+      "license": "MIT",
+      "license_url": "https://github.com/arcusmaximus/KirikiriTools/blob/master/LICENSE",
+      "sha256": "C6F4A6F4D74CD293777CD321CEFDEAE88FF4DD344C4F2A0BCBC88840AA717CB6",
+      "bundled": true,
+      "bundled_relative_path": "_internal/tools/kirikiri/kirikiri_tools",
+      "engine_scope": ["kirikiri"],
+      "capabilities": ["archive_pack"],
+      "command_template": ["{tool}", "{input_dir}"],
+      "output_contract": ["xp3_readable", "entry_count_match"]
+    },
+    {
+      "name": "kirikiri_unencrypted_version",
+      "version": "1.7",
+      "source_url": "https://github.com/arcusmaximus/KirikiriTools/releases/tag/1.7",
+      "license": "MIT",
+      "license_url": "https://github.com/arcusmaximus/KirikiriTools/blob/master/LICENSE",
+      "sha256": "52745037818BEB55EF3C3006342658080B652F81FC652020780904ED2CF358D2",
+      "bundled": true,
+      "bundled_relative_path": "_internal/tools/kirikiri/kirikiri_tools",
+      "engine_scope": ["kirikiri"],
+      "capabilities": ["xp3_bridge", "sjis_compatibility"],
+      "command_template": [],
+      "output_contract": ["manifest_owned", "rollback_safe"]
+    },
+    {
+      "name": "vntextpatch",
+      "version": "source-built",
+      "source_url": "https://github.com/arcusmaximus/VNTranslationTools",
+      "license": "MIT",
+      "license_url": "https://github.com/arcusmaximus/VNTranslationTools/blob/main/LICENSE",
+      "sha256": "",
+      "bundled": false,
+      "bundled_relative_path": "_internal/tools/kirikiri/vntextpatch",
+      "engine_scope": ["kirikiri"],
+      "capabilities": ["script_export", "script_import", "speaker_names", "sjis_tunnel", "word_wrap"],
+      "command_template": ["{tool}", "extractlocal", "{input_dir}", "{output_dir}"],
+      "output_contract": ["text_items", "speaker_roles", "script_round_trip"]
+    },
+    {
+      "name": "vntextproxy",
+      "version": "source-built",
+      "source_url": "https://github.com/arcusmaximus/VNTranslationTools",
+      "license": "MIT",
+      "license_url": "https://github.com/arcusmaximus/VNTranslationTools/blob/main/LICENSE",
+      "sha256": "",
+      "bundled": false,
+      "bundled_relative_path": "_internal/tools/kirikiri/vntextproxy",
+      "engine_scope": ["kirikiri"],
+      "capabilities": ["sjis_tunnel_decode", "font_compatibility", "locale_compatibility"],
+      "command_template": [],
+      "output_contract": ["sjis_ext_bin", "single_display_backend"]
+    },
+    {
+      "name": "msg_tool",
+      "version": "source-built",
+      "source_url": "https://github.com/lifegpc/msg-tool",
+      "license": "GPL-3.0",
+      "license_url": "https://github.com/lifegpc/msg-tool/blob/master/LICENSE",
+      "sha256": "",
+      "bundled": false,
+      "bundled_relative_path": "_internal/tools/kirikiri/msg_tool",
+      "engine_scope": ["kirikiri"],
+      "capabilities": ["archive_unpack", "archive_pack", "script_export", "script_import"],
+      "command_template": ["{tool}", "unpack", "{archive}", "{output_dir}"],
+      "output_contract": ["script_files", "archive_round_trip", "exit_code_not_sufficient"]
+    }
+  ]
+}
