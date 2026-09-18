@@ -1,7 +1,7 @@
 """Real-time translation runner.
 
 Launches a game, injects realtime_hook.js, and pipes captured text
-through the translation pipeline (LunaTranslator-style queue + cache).
+through the translation pipeline (queue + cache).
 
 Usage:
     python frida/run_realtime.py game.exe [--attach PID] [--src ja] [--tgt zh-CN]
@@ -63,7 +63,7 @@ def _build_translate_fn(api_key: str, src: str, tgt: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Real-time game translation (LunaTranslator-style)")
+    parser = argparse.ArgumentParser(description="Real-time game translation")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("exe", nargs="?", help="Game executable to launch")
     group.add_argument("--attach", type=int, metavar="PID", help="Attach to running process")

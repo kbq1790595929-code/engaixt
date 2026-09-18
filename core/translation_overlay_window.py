@@ -255,7 +255,7 @@ class OverlayShmWriter:
 
 
 class TranslationOverlayWindow:
-    """LunaTranslator-style display window fed by a shared-memory text source.
+    """Display window fed by a shared-memory text source.
 
     The source is either the native KiriKiri hook (C++) or an ``OverlayShmWriter``
     driven by a Python-side Frida capture loop for other engines — the reader

@@ -1,4 +1,4 @@
-"""detect 阶段补完：引擎选择、Luna 特征库 fallback、自动运行时探针、
+"""detect 阶段补完：引擎选择、引擎特征库 fallback、自动运行时探针、
 提取质量检查与提取/无文本诊断记录。
 
 模块级函数收 pipeline 作第一参数（Pipeline 类保留委托薄壳），
