@@ -126,8 +126,8 @@ def enter_kirikiri_runtime_capture_mode(
             return False
 
     pipeline._update_progress("runtime_capture", 90)
-    # This compatibility helper is now preparation-only. Static failure must
-    # never consume quota or start a game behind the user's back.
+    # This compatibility helper is now preparation-only. A static failure must
+    # never spend API credit or start a game behind the user's back.
     info("已生成 KiriKiri 运行时捕获启动器；等待用户点击“改用实时翻译”")
 
     pipeline._write_completion_notice(game_path, engine, mode="KiriKiri 实时捕获/显示层")

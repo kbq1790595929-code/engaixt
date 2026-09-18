@@ -1,0 +1,35 @@
+WOLF RPG runtime third-party notices
+====================================
+
+UberWolf / WolfRPG parser
+  Project: https://github.com/Sinflower/UberWolf
+  Parser source commit: 663dc2defaefc3073cc1178b488894a5aa1d4595
+  Bundled UberWolfCli release: v0.6.3
+  License: MIT
+  The complete license is included as UBERWOLF-LICENSE.txt.
+  EngAixt's optional native WOLF bridge is built from this pinned source tree
+  with a small build-time patch that enables the matching archive encoder for
+  caller-supplied custom keys. The patch is kept in
+  native/wolf_runtime/patches/uberwolf-custom-key-pack.patch.
+
+DXArchive components
+  Creator attribution retained from the upstream UberWolf source tree:
+  Takumi Yamada, DX Library Archive code.
+  The bridge consumes the DXArchive sources exactly through UberWolf's
+  published source tree; no game code or game keys are bundled.
+
+LZ4
+  Project: https://github.com/lz4/lz4
+  License: BSD-2-Clause
+  The complete license is included as LZ4-LICENSE.txt.
+
+nlohmann/json
+  Project: https://github.com/nlohmann/json
+  License: MIT
+  The complete license is included as NLOHMANN-JSON-LICENSE.txt.
+
+LLVM libc++, libc++abi and libunwind runtime components
+  Project: https://llvm.org/
+  License: Apache-2.0 WITH LLVM-exception
+  The complete license texts are included as LLVM-LIBCXX-LICENSE.txt,
+  LLVM-LIBCXXABI-LICENSE.txt and LLVM-LIBUNWIND-LICENSE.txt.

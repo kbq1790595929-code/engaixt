@@ -152,7 +152,7 @@ class RPGMakerEngine(EngineBase):
             return self._unpack_xp_mkxp(game_dir, workspace, rxdata_files)
 
         # MV/MZ: static/runtime scan only. The shared pipeline owns cache,
-        # quota checks, batching, and translator selection.
+        # cost checks, batching, and translator selection.
         self._is_mv_mz = True
         try:
             from core.rpgmaker_runtime import scan

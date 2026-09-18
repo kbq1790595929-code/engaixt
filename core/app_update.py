@@ -335,9 +335,9 @@ def is_newer_version(latest: str, current: str) -> bool:
 
 
 def _update_manifest_url() -> str:
-    # Keep the established public path for deployment compatibility. There is
-    # now one package and one update stream; no edition is consulted.
-    return f"{UPDATE_BASE_URL}/trial/latest.json"
+    # One package, one update stream. The manifest is published at the site root
+    # path; the older per-edition path stays on the server for installed builds.
+    return f"{UPDATE_BASE_URL}/latest.json"
 
 
 def _user_agent() -> str:

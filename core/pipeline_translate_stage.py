@@ -1,5 +1,5 @@
 """translate 阶段：翻译覆盖率门槛、缓存尾巴跳过、API/缓存统计、
-试用配额校验、检查点式 AI 翻译与质量校验重译。
+翻译成本估算、检查点式 AI 翻译与质量校验重译。
 
 模块级函数收 pipeline 作第一参数（Pipeline 类保留委托薄壳），
 与 core/pipeline_stage_runtime.py 的拆分模式一致。
