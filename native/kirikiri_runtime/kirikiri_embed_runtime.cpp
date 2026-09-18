@@ -310,7 +310,7 @@ void Initialize(const std::wstring &gameDir, bool enabled, DWORD waitTimeoutMs, 
     }
 }
 
-bool PassesLunaEmbedKrkrZFilter(const std::string &text) {
+bool PassesEmbedKrkrZFilter(const std::string &text) {
     if (text.empty() || text.size() > 2000) return false;
     bool hasNonAscii = false;
     for (unsigned char ch : text) {
@@ -351,7 +351,7 @@ bool IsHexColorToken(const std::string &token) {
     return true;
 }
 
-std::string NormalizeLunaEmbedKrkrZText(const std::string &text) {
+std::string NormalizeEmbedKrkrZText(const std::string &text) {
     std::string output;
     output.reserve(text.size());
     for (size_t index = 0; index < text.size();) {

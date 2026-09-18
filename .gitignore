@@ -21,6 +21,11 @@ bin/
 release_artifacts/
 build_data/
 
+# Native build outputs. test_hook.dll is produced next to the sources by
+# build.ps1; only the published runtime under assets/ is source-of-record.
+native/kirikiri_runtime/*.dll
+native/kirikiri_runtime/*.old-*
+
 # Debug artifacts (screenshots, probe outputs)
 artifacts/
 

@@ -618,7 +618,7 @@ class Api:
 
     def run_realtime(self, path: str, src_lang: str = "ja", tgt_lang: str = "zh-CN",
                      preload: str = ""):
-        """实时翻译模式（LunaTranslator 风格）— 后台线程启动。"""
+        """实时翻译模式 — 后台线程启动。"""
         import os, json, tempfile
         from pathlib import Path as _Path
 

@@ -13,14 +13,14 @@ Two conventions are used below:
 
 ## Behavioral references
 
-- **LunaTranslator / LunaHook** — <https://github.com/HIllya51/LunaTranslator>
-  - License: **GPLv3** (observed in local checkout `7ac9647`).
-  - Used as a behavioral reference for KiriKiri hook coverage and filtering.
-  - EngAixt's runtime hooks are independently written, behavior-equivalent
-    implementations. No LunaTranslator source code is copied into this
-    repository or into distributed builds.
-  - This is one reason EngAixt itself is GPLv3: it keeps the licensing position
-    unambiguous with respect to the reference implementation.
+This project contains no third-party behavioural-reference code. The KiriKiri
+runtime hooks are written against the engine's own calling conventions and are
+validated against real games, so no external hook implementation is vendored,
+linked, or required at runtime.
+
+EngAixt is licensed GPLv3; see `LICENSE`. This section records only what the
+project depends on, and the list above is the complete set of such
+dependencies.
 
 ## Vendored source compiled into EngAixt binaries
 

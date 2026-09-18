@@ -540,10 +540,15 @@ def launch_kirikiri_native_runtime(
     native_env["KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE"] = "1" if embed_enabled else "0"
     native_env["KIRIKIRI_EMBED_WAIT_MS"] = "6000"
 
-    # DLL 内部已实现短路优先级策略（参照 LunaTranslator），不再需要外部白名单控制。
+    # DLL 内部已实现短路优先级策略，不再需要外部白名单控制。
     # 按优先级尝试：zx → embed → z2/kr2，装成功一个就跳过剩余的，避免多 hook 冲突。
     capture_hooks = "zx,embed,z2,kr2"
 
+    # KIRIKIRI_CAPTURE_HOOKS is the name this build uses. The older
+    # KIRIKIRI_LUNA_CAPTURE_HOOKS is written too so a native binary deployed
+    # before the rename still reads its capture set instead of silently
+    # falling back to the default profile.
+    native_env["KIRIKIRI_CAPTURE_HOOKS"] = capture_hooks
     native_env["KIRIKIRI_LUNA_CAPTURE_HOOKS"] = capture_hooks
     try:
         proc = subprocess.Popen(
@@ -717,6 +722,7 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         f"$env:KIRIKIRI_NATIVE_HOOK_PROFILE = '{hook_profile}'",
         f"$env:KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE = '{'1' if use_overlay else '0'}'",
         f"$env:KIRIKIRI_EMBED_WAIT_MS = '{'6000' if use_overlay else '0'}'",
+        f"$env:KIRIKIRI_CAPTURE_HOOKS = '{capture_hooks_for_bat}'",
         f"$env:KIRIKIRI_LUNA_CAPTURE_HOOKS = '{capture_hooks_for_bat}'",
         "$overlayProc = $null",
         "$overlayRestartCount = 0",

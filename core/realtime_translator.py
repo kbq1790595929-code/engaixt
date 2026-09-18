@@ -1,6 +1,6 @@
-"""Real-time translation pipeline (LunaTranslator-style).
+"""Real-time translation pipeline.
 
-Architecture (behavior-aligned with LunaTranslator, without copying source):
+Architecture (capture-then-translate, no third-party source in the path):
 - Single consumer thread per translator instance
 - PriorityQueue: callback requests (priority=1) ahead of auto (priority=0)
 - "Newest wins": if queue has newer request, abandon current (raise Interrupted)
@@ -69,7 +69,7 @@ class _WorkerThread(threading.Thread):
 
 
 class RealtimeTranslator:
-    """Wraps any translate_one callable with LunaTranslator-style queue + cache."""
+    """Wraps any translate_one callable with a queue + cache."""
 
     def __init__(
         self,

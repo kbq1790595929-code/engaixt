@@ -30,8 +30,8 @@ def select_engine(pipeline, path: Path):
     if pipeline.diagnostics:
         pipeline.diagnostics.set("engine_candidates", diag_candidates)
     if not candidates:
-        # fallback: LunaTranslator 引擎特征库
-        engine = pipeline._try_luna_hints(path)
+        # fallback: 引擎特征库（由 scripts/gen_engine_signatures.py 生成）
+        engine = pipeline._try_signature_hints(path)
         if engine:
             return engine
         return None
@@ -42,29 +42,29 @@ def select_engine(pipeline, path: Path):
         warning(f"该引擎支持状态: {support}，可能无法自动完成全部流程")
     return engine
 
-def try_luna_hints(path: Path):
-    """LunaTranslator 引擎特征库 fallback。"""
+def try_signature_hints(path: Path):
+    """引擎特征库 fallback（生成表可能不存在，此时返回 None）。"""
     try:
-        from core.detector import detect_with_luna_hints
-        name = detect_with_luna_hints(path)
+        from core.detector import detect_with_signature_hints
+        name = detect_with_signature_hints(path)
         if name:
             from engines.base import EngineBase
-            class _LunaEngine(EngineBase):
-                name = "luna_hint"
-                label = f"Luna特征匹配 ({name})"
+            class _SignatureHintEngine(EngineBase):
+                name = "signature_hint"
+                label = f"特征库匹配 ({name})"
                 support_level = "experimental"
                 supports_extract = False
                 supports_repack = False
                 detect_priority = 1
                 limitations = [
-                    f"通过 LunaTranslator {name} 特征匹配，未实现自动提取。",
+                    f"通过引擎特征库匹配 {name}，未实现自动提取。",
                     "建议运行探针定位文本来源后手动配置引擎。",
                 ]
                 def detect(self, p): return True
                 def unpack(self, p, ws): return []
                 def repack(self, items, ws): pass
-            info(f"Luna 特征匹配: {name}")
-            return _LunaEngine()
+            info(f"特征库匹配: {name}")
+            return _SignatureHintEngine()
     except ImportError:
         pass
     return None

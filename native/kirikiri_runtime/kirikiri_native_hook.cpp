@@ -359,7 +359,7 @@ std::wstring Utf8ToWide(const std::string &s) {
     return out;
 }
 
-bool ContainsLunaEmbedKrkrZChatFlagWide(const std::wstring &s) {
+bool ContainsEmbedKrkrZChatFlag(const std::wstring &s) {
     static const wchar_t *flags[] = {
         L"（", L"）", L"。", L"「", L"」", L"『", L"』", L"？", L"！", L"、", L"―",
     };
@@ -1522,14 +1522,14 @@ extern "C" __declspec(dllexport) const char *__stdcall KiriKiriCaptureInternalUt
     if (!text) return text;
     std::string raw;
     if (!TryReadNarrowCString(text, maxBytes, &raw)) return text;
-    if (!kirikiri_embed::PassesLunaEmbedKrkrZFilter(raw)) return text;
+    if (!kirikiri_embed::PassesEmbedKrkrZFilter(raw)) return text;
     std::wstring wide = Utf8ToWide(raw);
-    if (!ContainsLunaEmbedKrkrZChatFlagWide(wide)) return text;
+    if (!ContainsEmbedKrkrZChatFlag(wide)) return text;
     if (CaptureRuntimeSpeakerCommand(wide)) {
         if (hitCounter) InterlockedIncrement(hitCounter);
         return text;
     }
-    std::string visibleUtf8 = kirikiri_embed::NormalizeLunaEmbedKrkrZText(raw);
+    std::string visibleUtf8 = kirikiri_embed::NormalizeEmbedKrkrZText(raw);
     std::wstring visible = RuntimeVisibleText(Utf8ToWide(visibleUtf8));
     if (!IsInternalCandidateText(visible)) return text;
     if (hitCounter) InterlockedIncrement(hitCounter);
@@ -1667,7 +1667,7 @@ extern "C" __declspec(dllexport) void __stdcall KiriKiriPatchPsbWideResult(
     }
     std::wstring wideSource = Utf8ToWide(raw);
     std::wstring visible = RuntimeVisibleText(
-        Utf8ToWide(kirikiri_embed::NormalizeLunaEmbedKrkrZText(raw)));
+        Utf8ToWide(kirikiri_embed::NormalizeEmbedKrkrZText(raw)));
     const std::wstring *translated = FindTranslationVariant(wideSource);
     if (!translated) translated = FindTranslationVariant(visible);
     if (!translated || translated->empty()) return;
@@ -4461,7 +4461,7 @@ bool FindTextRenderGetStringEaxCandidate(HMODULE module, void **out) {
                 continue;
             }
 
-            // Luna findtextrender3: push marker; call resolver; add esp,4;
+            // Texture-render variant: push marker; call resolver; add esp,4;
             // store function pointer; push register; call that pointer.
             if (resolver[5] != 0xE8 ||
                 resolver[10] != 0x83 || resolver[11] != 0xC4 || resolver[12] != 0x04 ||
@@ -4925,8 +4925,8 @@ size_t CountIatCallsToFunction(void *functionAddress, uintptr_t *firstAddress) {
     return count;
 }
 
-void ReportLunaHookCandidate(bool found, const std::wstring &name, uintptr_t address = 0, size_t count = 0, const wchar_t *risk = nullptr) {
-    std::wstring line = std::wstring(L"[kirikiri native] luna candidate ") + name +
+void ReportCaptureHookCandidate(bool found, const std::wstring &name, uintptr_t address = 0, size_t count = 0, const wchar_t *risk = nullptr) {
+    std::wstring line = std::wstring(L"[kirikiri native] capture candidate ") + name +
                         L": " + (found ? L"yes" : L"no");
     if (count) line += L" count=" + std::to_wstring(count);
     if (address) line += L" @" + std::to_wstring(address);
@@ -4937,16 +4937,16 @@ void ReportLunaHookCandidate(bool found, const std::wstring &name, uintptr_t add
 void ReportKagParserModuleCandidates(const wchar_t *moduleName, bool exParser) {
     HMODULE module = GetModuleHandleW(moduleName);
     std::wstring prefix(moduleName);
-    ReportLunaHookCandidate(module != nullptr, prefix + L" module",
+    ReportCaptureHookCandidate(module != nullptr, prefix + L" module",
                             reinterpret_cast<uintptr_t>(module), 0, L"safe-scan");
     if (!module) return;
 
     void *target = nullptr;
-    ReportLunaHookCandidate(FindKagParserTjsStringEntry(module, &target),
+    ReportCaptureHookCandidate(FindKagParserTjsStringEntry(module, &target),
                             prefix + L" tTJSString arg2",
                             reinterpret_cast<uintptr_t>(target), 0, L"default-safe");
     target = nullptr;
-    ReportLunaHookCandidate(FindKagParserTextBufferCandidate(module, exParser, &target),
+    ReportCaptureHookCandidate(FindKagParserTextBufferCandidate(module, exParser, &target),
                             prefix + L" text buffer",
                             reinterpret_cast<uintptr_t>(target), 0, L"default-safe");
 }
@@ -4955,40 +4955,40 @@ void ReportLegacyGdiCallerCandidates() {
     HMODULE gdi32 = GetModuleHandleW(L"gdi32.dll");
     if (!gdi32) gdi32 = LoadLibraryW(L"gdi32.dll");
     if (!gdi32) {
-        ReportLunaHookCandidate(false, L"KiriKiri1/GetGlyphOutlineW caller", 0, 0, L"observe-only");
-        ReportLunaHookCandidate(false, L"KiriKiri2/GetTextExtentPoint32W caller", 0, 0, L"observe-only");
+        ReportCaptureHookCandidate(false, L"KiriKiri1/GetGlyphOutlineW caller", 0, 0, L"observe-only");
+        ReportCaptureHookCandidate(false, L"KiriKiri2/GetTextExtentPoint32W caller", 0, 0, L"observe-only");
         return;
     }
 
     uintptr_t first = 0;
     size_t count = CountIatCallsToFunction(reinterpret_cast<void *>(GetProcAddress(gdi32, "GetGlyphOutlineW")), &first);
-    ReportLunaHookCandidate(count > 0, L"KiriKiri1/GetGlyphOutlineW caller", first, count, L"observe-only");
+    ReportCaptureHookCandidate(count > 0, L"KiriKiri1/GetGlyphOutlineW caller", first, count, L"observe-only");
 
     first = 0;
     count = CountIatCallsToFunction(reinterpret_cast<void *>(GetProcAddress(gdi32, "GetTextExtentPoint32W")), &first);
-    ReportLunaHookCandidate(count > 0, L"KiriKiri2/GetTextExtentPoint32W caller", first, count, L"observe-only");
+    ReportCaptureHookCandidate(count > 0, L"KiriKiri2/GetTextExtentPoint32W caller", first, count, L"observe-only");
 }
 
 void ReportTextRenderCandidate() {
     HMODULE module = GetModuleHandleW(L"textrender.dll");
     void *target = nullptr;
     bool found = FindTextRenderGetStringEaxCandidate(module, &target);
-    ReportLunaHookCandidate(found, L"TextRender EAX GetString/textrender.dll",
+    ReportCaptureHookCandidate(found, L"TextRender EAX GetString/textrender.dll",
                             reinterpret_cast<uintptr_t>(target), 0, L"default-embed");
     if (!found) {
         target = nullptr;
         found = FindTextRenderFallbackCandidate(module, &target);
-        ReportLunaHookCandidate(found, L"TextRender stack arg1/textrender.dll",
+        ReportCaptureHookCandidate(found, L"TextRender stack arg1/textrender.dll",
                                 reinterpret_cast<uintptr_t>(target), 0, L"fallback-embed");
     }
 }
 
-void ReportExperimentalLunaHookCandidates() {
+void ReportExperimentalTextHookCandidates() {
     static bool reported = false;
     if (reported) return;
     reported = true;
 
-    Log(L"[kirikiri native] luna candidate matrix begin");
+    Log(L"[kirikiri native] capture candidate matrix begin");
     ReportKagParserModuleCandidates(L"KAGParser.dll", false);
     ReportKagParserModuleCandidates(L"ExtKAGParser.dll", true);
     ReportKagParserModuleCandidates(L"KAGParserEx.dll", true);
@@ -4999,8 +4999,8 @@ void ReportExperimentalLunaHookCandidates() {
     BYTE *base = nullptr;
     size_t size = 0;
     if (!ModuleTextRange(module, &base, &size)) {
-        Log(L"[kirikiri native] luna candidate scan skipped: executable .text not found");
-        Log(L"[kirikiri native] luna candidate matrix end");
+        Log(L"[kirikiri native] capture candidate scan skipped: executable .text not found");
+        Log(L"[kirikiri native] capture candidate matrix end");
         return;
     }
 
@@ -5012,7 +5012,7 @@ void ReportExperimentalLunaHookCandidates() {
         0x89, 0x1E,
         0xEB, 0x1B
     };
-    ReportLunaHookCandidate(SearchPattern(base, size, krkrz3Pattern, "xxxxxxxxxxxx", &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, krkrz3Pattern, "xxxxxxxxxxxx", &target),
                             L"KiriKiriZ3", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
 
     const BYTE kirikiriZXPattern[] = {
@@ -5029,7 +5029,7 @@ void ReportExperimentalLunaHookCandidates() {
     for (size_t i = 14; i <= 17; ++i) kirikiriZXMask[i] = '?';
     for (size_t i = 21; i <= 24; ++i) kirikiriZXMask[i] = '?';
     target = nullptr;
-    ReportLunaHookCandidate(SearchPattern(base, size, kirikiriZXPattern, kirikiriZXMask.c_str(), &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, kirikiriZXPattern, kirikiriZXMask.c_str(), &target),
                             L"KiriKiriZX", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
 
     const BYTE krkrz2Pattern[] = {
@@ -5057,7 +5057,7 @@ void ReportExperimentalLunaHookCandidates() {
     for (size_t i = 39; i <= 42; ++i) krkrz2Mask[i] = '?';
     for (size_t i = 46; i <= 49; ++i) krkrz2Mask[i] = '?';
     target = nullptr;
-    ReportLunaHookCandidate(SearchPattern(base, size, krkrz2Pattern, krkrz2Mask.c_str(), &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, krkrz2Pattern, krkrz2Mask.c_str(), &target),
                             L"krkrz2", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
 
     const BYTE kirikiriZ2Pattern[] = {
@@ -5071,12 +5071,12 @@ void ReportExperimentalLunaHookCandidates() {
         0x0F, 0xB7, 0x43, 0x14
     };
     target = nullptr;
-    ReportLunaHookCandidate(SearchPattern(base, size, kirikiriZ2Pattern, "xxxxxxxxxxxxxxxxxxxxxxx", &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, kirikiriZ2Pattern, "xxxxxxxxxxxxxxxxxxxxxxx", &target),
                             L"KiriKiriZ2", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
 
     uintptr_t firstEmbed = 0;
     size_t embedCount = CountEmbedKrkrZCandidates(base, size, &firstEmbed);
-    ReportLunaHookCandidate(embedCount > 0, L"EmbedKrkrZ", firstEmbed, embedCount, L"experimental-inline");
+    ReportCaptureHookCandidate(embedCount > 0, L"EmbedKrkrZ", firstEmbed, embedCount, L"experimental-inline");
 
     const BYTE embedKrkr2Pattern[] = {
         0x66, 0x8B, 0x06,
@@ -5088,7 +5088,7 @@ void ReportExperimentalLunaHookCandidates() {
     std::string embedKrkr2Mask(sizeof(embedKrkr2Pattern), 'x');
     for (size_t i = 8; i <= 12; ++i) embedKrkr2Mask[i] = '?';
     target = nullptr;
-    ReportLunaHookCandidate(SearchPattern(base, size, embedKrkr2Pattern, embedKrkr2Mask.c_str(), &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, embedKrkr2Pattern, embedKrkr2Mask.c_str(), &target),
                             L"EmbedKrkr2", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
 
     const BYTE wcscpyPattern[] = {
@@ -5107,7 +5107,7 @@ void ReportExperimentalLunaHookCandidates() {
     wcscpyMask[10] = '?';
     wcscpyMask[18] = '?';
     target = nullptr;
-    ReportLunaHookCandidate(SearchPattern(base, size, wcscpyPattern, wcscpyMask.c_str(), &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, wcscpyPattern, wcscpyMask.c_str(), &target),
                             L"Krkr2wcs", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
 
     const BYTE kirikiri4Pattern[] = {
@@ -5127,32 +5127,44 @@ void ReportExperimentalLunaHookCandidates() {
         kirikiri4Mask[index] = 'x';
     }
     target = nullptr;
-    ReportLunaHookCandidate(SearchPattern(base, size, kirikiri4Pattern, kirikiri4Mask.c_str(), &target),
+    ReportCaptureHookCandidate(SearchPattern(base, size, kirikiri4Pattern, kirikiri4Mask.c_str(), &target),
                             L"KiriKiri4", reinterpret_cast<uintptr_t>(target), 0, L"experimental-inline");
-    Log(L"[kirikiri native] luna candidate matrix end");
+    Log(L"[kirikiri native] capture candidate matrix end");
 }
 
-bool ExperimentalLunaHooksEnabled() {
-    return EnvFlagEnabled(L"KIRIKIRI_EXPERIMENTAL_LUNA_HOOKS");
+bool ExperimentalTextHooksEnabled() {
+    // Legacy fallback: a launcher deployed before the rename only sets the old
+    // name, and an enable flag that silently reads as "off" is worse than one
+    // that honours both spellings.
+    return EnvFlagEnabled(L"KIRIKIRI_EXPERIMENTAL_TEXT_HOOKS") ||
+           EnvFlagEnabled(L"KIRIKIRI_EXPERIMENTAL_LUNA_HOOKS");
 }
 
-std::wstring LunaCaptureHookMode() {
-    wchar_t value[128] = {};
-    DWORD n = GetEnvironmentVariableW(L"KIRIKIRI_LUNA_CAPTURE_HOOKS", value, 128);
-    if (n == 0 || n >= 128) return L"";
-    std::wstring mode(value, value + n);
-    std::transform(mode.begin(), mode.end(), mode.begin(), towlower);
-    return mode;
+std::wstring CaptureHookMode() {
+    // The current launcher writes both names. Reading the legacy name as a
+    // fallback keeps a previously deployed launcher (which only knew that name)
+    // working: without it this build would silently drop to the default profile
+    // instead of reporting a mismatch.
+    static const wchar_t *kEnvNames[] = {L"KIRIKIRI_CAPTURE_HOOKS", L"KIRIKIRI_LUNA_CAPTURE_HOOKS"};
+    for (const wchar_t *envName : kEnvNames) {
+        wchar_t value[128] = {};
+        DWORD n = GetEnvironmentVariableW(envName, value, 128);
+        if (n == 0 || n >= 128) continue;
+        std::wstring mode(value, value + n);
+        std::transform(mode.begin(), mode.end(), mode.begin(), towlower);
+        return mode;
+    }
+    return L"";
 }
 
-bool LunaCaptureHookSelected(const std::wstring &mode, const wchar_t *name) {
+bool CaptureHookSelected(const std::wstring &mode, const wchar_t *name) {
     if (mode.empty()) return false;
     if (mode == L"1" || mode == L"true" || mode == L"yes" || mode == L"all") return true;
     return mode.find(name) != std::wstring::npos;
 }
 
 // Top-level exception guard using VEH + setjmp/longjmp to prevent crashes from propagating.
-// Adopts LunaTranslator's defensive exception handling strategy (enginecontrol.cpp HIJACK/__try),
+// Adopts a defensive exception handling strategy for the hijack trampoline (__try around the original call),
 // but uses VEH instead of SEH due to llvm-mingw i686 limitation: SEH code generation fails
 // when __try blocks contain function calls (only inline memory access is supported).
 static thread_local jmp_buf gHookInstallJmpBuf;
@@ -5179,14 +5191,14 @@ LONG WINAPI HookInstallExceptionHandler(EXCEPTION_POINTERS *exceptionInfo) {
 void InstallInternalTextHooks() {
     if (!gInternalTextHooks) return;
     bool ok = false;
-    std::wstring captureMode = LunaCaptureHookMode();
-    if (LunaCaptureHookSelected(captureMode, L"psb")) {
+    std::wstring captureMode = CaptureHookMode();
+    if (CaptureHookSelected(captureMode, L"psb")) {
         ok = InstallPsbPostConversionHook() || ok;
     }
-    if (LunaCaptureHookSelected(captureMode, L"textrender")) {
+    if (CaptureHookSelected(captureMode, L"textrender")) {
         ok = InstallTextRenderInternalHook() || ok;
     }
-    if (LunaCaptureHookSelected(captureMode, L"kag")) {
+    if (CaptureHookSelected(captureMode, L"kag")) {
         ok = InstallKagParserEntryHook(L"KAGParser.dll", &gKagParserEntryHookTarget) || ok;
         ok = InstallKagParserEntryHook(L"ExtKAGParser.dll", &gExtKagParserEntryHookTarget) || ok;
         ok = InstallKagParserInternalHook(L"KAGParser.dll", false) || ok;
@@ -5197,33 +5209,33 @@ void InstallInternalTextHooks() {
         static bool captureLogged = false;
         if (!captureLogged) {
             captureLogged = true;
-            Log(L"[kirikiri native] Luna capture-only hooks enabled: " + captureMode);
+            Log(L"[kirikiri native] capture-only hooks enabled: " + captureMode);
         }
-        // 短路优先级策略：Luna Z 系列 hook 按优先级依次尝试，装成功一个就跳过剩余的
-        // 参照 LunaTranslator KiriKiri.cpp:1744-1761 的短路逻辑
-        bool lunaZHookInstalled = false;
-        if (LunaCaptureHookSelected(captureMode, L"zx")) {
+        // 短路优先级策略：Z 系列 capture hook 按优先级依次尝试，装成功一个就跳过剩余的
+        // 短路逻辑：本引擎的 KiriKiriZ 系列 hook 互斥，命中一个即停止后续安装
+        bool zHookInstalled = false;
+        if (CaptureHookSelected(captureMode, L"zx")) {
             if (InstallKiriKiriZXInternalHook()) {
-                lunaZHookInstalled = true;
+                zHookInstalled = true;
                 ok = true;
             }
         }
-        if (!lunaZHookInstalled && LunaCaptureHookSelected(captureMode, L"embed")) {
+        if (!zHookInstalled && CaptureHookSelected(captureMode, L"embed")) {
             if (InstallEmbedKrkrZUtf8Hooks()) {
-                lunaZHookInstalled = true;
+                zHookInstalled = true;
                 ok = true;
             }
         }
-        if (!lunaZHookInstalled && (LunaCaptureHookSelected(captureMode, L"z2") ||
-                                     LunaCaptureHookSelected(captureMode, L"kr2"))) {
+        if (!zHookInstalled && (CaptureHookSelected(captureMode, L"z2") ||
+                                     CaptureHookSelected(captureMode, L"kr2"))) {
             if (InstallKiriKiriZ2IndirectHook()) {
-                lunaZHookInstalled = true;
+                zHookInstalled = true;
                 ok = true;
             }
         }
-        if (!lunaZHookInstalled && LunaCaptureHookSelected(captureMode, L"kr2")) {
+        if (!zHookInstalled && CaptureHookSelected(captureMode, L"kr2")) {
             if (InstallEmbedKrkr2WideHook()) {
-                lunaZHookInstalled = true;
+                zHookInstalled = true;
                 ok = true;
             }
         }
@@ -5231,10 +5243,10 @@ void InstallInternalTextHooks() {
         static bool captureDisabledLogged = false;
         if (!captureDisabledLogged) {
             captureDisabledLogged = true;
-            Log(L"[kirikiri native] Luna capture-only hooks disabled by KIRIKIRI_LUNA_CAPTURE_HOOKS");
+            Log(L"[kirikiri native] capture-only hooks disabled by KIRIKIRI_CAPTURE_HOOKS");
         }
     }
-    if (ExperimentalLunaHooksEnabled()) {
+    if (ExperimentalTextHooksEnabled()) {
         ok = InstallKiriKiriZ3InternalHook() || ok;
         ok = InstallKrkrZ2InternalHook() || ok;
         ok = InstallKrkr2WcsHook() || ok;
@@ -5242,8 +5254,8 @@ void InstallInternalTextHooks() {
         static bool logged = false;
         if (!logged) {
             logged = true;
-            Log(L"[kirikiri native] experimental Luna-style inline hooks disabled by default");
-            ReportExperimentalLunaHookCandidates();
+            Log(L"[kirikiri native] experimental inline text hooks disabled by default");
+            ReportExperimentalTextHookCandidates();
         }
     }
     if (!ok && gInternalHookInstallCount == 0) {
@@ -5767,7 +5779,7 @@ DWORD WINAPI InitThread(void *) {
     DeleteFileW(gLogPath.c_str());
     Log(L"[kirikiri native] init");
     Log(std::wstring(L"[kirikiri native] build=") + kHookBuildTag);
-    Log(L"[kirikiri native] luna behavior reference=LunaTranslator 413dc89 engine32/KiriKiri.cpp");
+    Log(L"[kirikiri native] engine behavior reference: KiriKiri engine32 KAGParser/TextRender contracts");
     Log(L"[kirikiri native] engine layout reference=KRKRZ fd5c4ba tjs2/tjsVariantString.h");
     InitOverlaySharedMemory();
     if (gOverlaySharedMemoryView) {

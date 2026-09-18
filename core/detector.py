@@ -75,21 +75,21 @@ def _ensure_engines_loaded():
     _engines_loaded = True
 
 
-def detect_with_luna_hints(path: Path) -> str | None:
-    """Use LunaTranslator engine signatures as fallback detection.
+def detect_with_signature_hints(path: Path) -> str | None:
+    """Use the generated engine signature table as fallback detection.
 
     Returns engine class name if matched, else None.
     This is a supplementary detection method when built-in engines don't match.
     """
     try:
-        from core.luna_engine_hints import LUNA_ENGINE_HINTS
+        from _generated.engine_signatures import ENGINE_SIGNATURE_HINTS
     except ImportError:
         return None
 
     if not path.is_dir():
         path = path.parent
 
-    for engine_name, hint in LUNA_ENGINE_HINTS.items():
+    for engine_name, hint in ENGINE_SIGNATURE_HINTS.items():
         check_by = hint["check_by"]
         patterns = hint["patterns"]
 
