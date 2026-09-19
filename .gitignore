@@ -41,6 +41,22 @@ tools/_downloads/
 # Local native build toolchains/caches
 native/toolchains/
 
+# Legacy copies kept for reference only (old repo history bundles, superseded
+# build_data archives, archived paid-edition modules). Never part of a build.
+archive/
+
+# site/downloads holds the split release package that gets uploaded; the site
+# source itself (html/css/img) stays tracked.
+site/downloads/
+
+# Development-only material is maintained in the private source repository.
+docs/
+scripts/
+tests/
+tools/
+vendor/
+site/
+
 # Bundled third-party tool binaries. These are assembled at packaging time and
 # downloaded on demand at runtime by core.tool_manager, matching the intent
 # already stated in game-translator.spec ("the source tree intentionally does
