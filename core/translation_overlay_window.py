@@ -7,6 +7,7 @@ import asyncio
 import base64
 import hashlib
 import mmap
+import os
 import queue
 import re
 import struct
@@ -23,6 +24,7 @@ from config import CONFIG_PATH, get_config, reload_config, save_config
 from core.runtime_translation_context import RollingTranslationContext
 from core.runtime_translation_retry import translate_with_empty_retry
 from engines.base import TextItem
+from utils.text_extract import is_punctuation_only
 
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -280,6 +282,11 @@ class TranslationOverlayWindow:
         self._last_process_name_check = 0.0
         self._started_at = time.time()
         self._close_requested = False
+        target_file = os.environ.get("KIRIKIRI_RUNTIME_TARGET_FILE", "")
+        self._runtime_target_path = Path(target_file) if target_file else None
+        self._target_dead_since: float | None = None
+        self._displayed_translation_count = 0
+        self._latest_capture_key: tuple[str, str] | None = None
         self.text_queue: queue.Queue[dict] = queue.Queue(maxsize=100)
         self.translate_queue: queue.Queue[dict] = queue.Queue(maxsize=200)
         self.running = False
@@ -568,6 +575,8 @@ class TranslationOverlayWindow:
             user32.EnumWindows(enum_proc(enum_pid_callback), 0)
             if self.game_hwnd:
                 return
+            if self._runtime_target_path is not None:
+                return
 
         def enum_callback(hwnd, _) -> bool:
             if user32.IsWindowVisible(hwnd):
@@ -600,6 +609,9 @@ class TranslationOverlayWindow:
         if not self.game_pid:
             return None
         kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD]
+        kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
         synchronize = 0x00100000
         wait_timeout = 0x00000102
         handle = kernel32.OpenProcess(synchronize, False, int(self.game_pid))
@@ -632,6 +644,39 @@ class TranslationOverlayWindow:
             return False
         self.game_pid = matches[0][0]
         self._game_seen = True
+        return True
+
+    def _runtime_target_running(self) -> bool | None:
+        if self._runtime_target_path is None:
+            return None
+        try:
+            pid_text, state, path = self._runtime_target_path.read_text(encoding="utf-8").strip().split("\t", 2)
+            pid = int(pid_text)
+        except (OSError, ValueError):
+            return None
+        if state in {"closed", "failed"}:
+            self._log(f"runtime_session_ended state={state} last_pid={self.game_pid}")
+            return False
+        if pid <= 0 or state not in {"starting", "running"}:
+            return None
+        if self.game_exe_path and Path(path).resolve().parent != Path(self.game_exe_path).resolve().parent:
+            self._log(f"runtime_target_rejected pid={pid} exe={path}")
+            return None
+        if pid != self.game_pid:
+            self._log(f"runtime_target_changed pid={pid} exe={path}")
+            self.game_pid = pid
+            self.game_hwnd = None
+            self._target_dead_since = None
+            self._game_seen = True
+        if self._game_process_alive() is False:
+            if self._target_dead_since is None:
+                self._target_dead_since = time.monotonic()
+            # Give the launcher time to discover and publish a replacement child.
+            if time.monotonic() - self._target_dead_since >= 5.0:
+                self._log(f"runtime_target_lost pid={pid} exe={path}")
+                return False
+        else:
+            self._target_dead_since = None
         return True
 
     def _processes_by_name(self, exe: str) -> list[tuple[int, str]]:
@@ -903,22 +948,22 @@ class TranslationOverlayWindow:
 
     def _track_game_window(self) -> None:
         while self.running:
-            running_by_name = self._game_exe_process_running()
+            managed = self._runtime_target_path is not None
+            running_by_name = self._runtime_target_running() if managed else self._game_exe_process_running()
             if running_by_name is True:
                 self._game_process_name_seen = True
-            elif running_by_name is False and self._game_process_name_seen:
+            elif running_by_name is False and (managed or self._game_process_name_seen):
                 self._close_requested = True
                 return
-            if self._game_seen:
+            if self._game_seen and not managed:
                 alive = self._game_process_alive()
                 if alive is False:
                     self._close_requested = True
                     return
-                if self.game_hwnd and not ctypes.windll.user32.IsWindow(self.game_hwnd):
-                    self._close_requested = True
-                    return
+            if self.game_hwnd and not ctypes.windll.user32.IsWindow(self.game_hwnd):
+                self.game_hwnd = None
 
-            if not self.game_hwnd:
+            if not self.game_hwnd and (not managed or self.game_pid):
                 self._find_game_window()
             if self.game_hwnd:
                 rect = self._get_game_window_rect()
@@ -1636,8 +1681,10 @@ class TranslationOverlayWindow:
                 self._enqueue_text(original, translated, seq, speaker)
                 time.sleep(0.05)
                 consecutive_errors = 0
-            except Exception:
+            except Exception as exc:
                 consecutive_errors += 1
+                if consecutive_errors == 1:
+                    self._log(f"shm_read_failed: {exc}")
                 if consecutive_errors > 10:
                     if shm:
                         try:
@@ -1654,8 +1701,17 @@ class TranslationOverlayWindow:
             except Exception:
                 pass
 
-    def _enqueue_text(self, original: str, translated: str, seq: int, speaker: str = "") -> None:
+    def _enqueue_text(
+        self, original: str, translated: str, seq: int, speaker: str = "",
+        *, translation_result: bool = False,
+    ) -> None:
         display_speaker, _display_original, translate_text = runtime_dialogue_parts(original, speaker)
+        capture_key = (display_speaker, translate_text)
+        if not translation_result:
+            self._latest_capture_key = capture_key
+        punctuation_only = is_punctuation_only(translate_text)
+        if punctuation_only:
+            translated = original
         if original and not translated:
             cached = self.local_translations.get(original)
             if not cached and translate_text != original:
@@ -1664,7 +1720,7 @@ class TranslationOverlayWindow:
                 translated = cached
             elif self.live_translate:
                 self._request_live_translation(translate_text, display_speaker, display_original=original)
-        if translated:
+        if translated and not punctuation_only:
             _translated_speaker, _translated_display, translated_text = runtime_dialogue_parts(
                 translated, display_speaker
             )
@@ -1680,6 +1736,7 @@ class TranslationOverlayWindow:
             "translate_key": translate_text,
             "seq": seq,
             "timestamp": time.time(),
+            "history_only": translation_result and capture_key != self._latest_capture_key,
         }
         try:
             self.text_queue.put_nowait(item)
@@ -1692,7 +1749,10 @@ class TranslationOverlayWindow:
 
     def _request_live_translation(self, original: str, speaker: str = "", display_original: str = "") -> None:
         original = (original or "").strip()
-        if not original or original in self._translation_inflight or original in self.local_translations:
+        if (
+            not original or is_punctuation_only(original)
+            or original in self._translation_inflight or original in self.local_translations
+        ):
             return
         self._translation_inflight.add(original)
         request = {
@@ -1727,6 +1787,8 @@ class TranslationOverlayWindow:
                 display_original = original
                 context = []
             try:
+                if not original or is_punctuation_only(original):
+                    continue
                 translated = translate_with_empty_retry(
                     lambda: self._translate_live_text(original, context=context, speaker=speaker),
                     original,
@@ -1736,7 +1798,10 @@ class TranslationOverlayWindow:
                 )
                 if translated and translated != original:
                     self._append_local_translation(original, translated)
-                    self._enqueue_text(display_original, translated, self._last_seq + 1, speaker)
+                    self._enqueue_text(
+                        display_original, translated, self._last_seq, speaker,
+                        translation_result=True,
+                    )
                     self._log(f"live_translated: {original[:60]}")
                 else:
                     self._log(f"live_translate_empty: {original[:60]}")
@@ -1848,7 +1913,11 @@ class TranslationOverlayWindow:
             if history_changed:
                 self._render_history_window()
 
-            latest = texts_batch[-1]
+            display_items = [item for item in texts_batch if not item.get("history_only")]
+            if not display_items:
+                self.window.after(100, self._update_display)
+                return
+            latest = display_items[-1]
             original = latest.get("original", "")
             translated = latest.get("translated", "")
             translate_key = latest.get("translate_key", original)
@@ -1872,6 +1941,14 @@ class TranslationOverlayWindow:
                 display_text = translated_body if translated_speaker else translated
                 display_color = self.text_color
                 display_state = "translated"
+                if is_punctuation_only(original_display):
+                    self._log(f"text_passthrough original={original_display[:160]!r}")
+                else:
+                    self._displayed_translation_count += 1
+                    self._log(
+                        f"text_displayed count={self._displayed_translation_count} "
+                        f"original={original_display[:160]!r} translated={display_text[:160]!r}"
+                    )
             elif original:
                 display_text = _PENDING_TEXT if translate_key in self._translation_inflight else _UNTRANSLATED_TEXT
                 display_color = self.pending_color

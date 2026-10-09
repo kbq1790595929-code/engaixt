@@ -650,12 +650,16 @@ class Api:
                     launcher = create_kirikiri_native_launcher(policy_path, engine=engine)
                     if launcher:
                         self._js("on_log(20, " + json.dumps("已生成 KRKR 便携启动器: " + str(launcher), ensure_ascii=False) + ")")
-                    ok = launch_kirikiri_native_runtime(policy_path, engine=engine, wait=True)
+                    def runtime_log(level, message):
+                        self._js(f"on_log({int(level)}, " + json.dumps(message, ensure_ascii=False) + ")")
+
+                    ok = launch_kirikiri_native_runtime(
+                        policy_path, engine=engine, wait=True, on_log=runtime_log,
+                    )
                     if ok:
-                        self._js("on_log(20, " + json.dumps("KRKR 实时翻译已结束", ensure_ascii=False) + ")")
                         self._js("on_status('空闲')")
                     else:
-                        self._js("on_log(50, " + json.dumps("KRKR 实时翻译启动失败，请查看 _translation_meta 日志", ensure_ascii=False) + ")")
+                        self._js("on_log(50, " + json.dumps("KRKR 实时翻译存在错误，具体原因见上方运行日志", ensure_ascii=False) + ")")
                         self._js("on_status('失败')")
                 except Exception as e:
                     self._js("on_log(50, " + json.dumps("KRKR 实时翻译错误: " + str(e), ensure_ascii=False) + ")")
