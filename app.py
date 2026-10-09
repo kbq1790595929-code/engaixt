@@ -86,11 +86,19 @@ def _schedule_library_prune():
 
 def _find_translated_launcher(game_dir: Path, manifest_data: dict | None = None) -> Path | None:
     """Return the translated launcher for a game when the pipeline created one."""
+    from core.kirikiri_launcher_policy import (
+        KIRIKIRI_REALTIME_LAUNCHER_NAME,
+        find_kirikiri_static_launcher,
+        kirikiri_launcher_route,
+    )
+
+    data = manifest_data if isinstance(manifest_data, dict) else {}
+    if str(data.get("engine") or "").strip().casefold() == "kirikiri":
+        return find_kirikiri_static_launcher(game_dir)
     direct = game_dir / "启动汉化版.bat"
-    if direct.is_file():
+    if direct.is_file() and kirikiri_launcher_route(direct) == "static":
         return direct
 
-    data = manifest_data or {}
     candidates: list[Path] = []
     for item in data.get("created_files", []) if isinstance(data, dict) else []:
         if not item.get("runtime_required") and item.get("kind") != "runtime":
@@ -129,6 +137,10 @@ def _find_translated_launcher(game_dir: Path, manifest_data: dict | None = None)
             resolved = path.resolve()
             resolved.relative_to(game_dir.resolve())
             if path.is_file():
+                if path.name.casefold() == KIRIKIRI_REALTIME_LAUNCHER_NAME.casefold():
+                    continue
+                if path.suffix.casefold() in {".bat", ".cmd"} and kirikiri_launcher_route(path) != "static":
+                    continue
                 return path
         except (OSError, ValueError):
             continue
@@ -1053,10 +1065,10 @@ class Api:
                         "汉化启动器启动失败，回退原始启动: " + str(e),
                         ensure_ascii=False,
                     ) + ")")
-            if p.is_file():
+            if p.is_file() and p.suffix.lower() == ".exe":
                 os.startfile(str(p))
                 return
-            exe = find_main_exe(p, recursive=False) or find_main_exe(p, recursive=True)
+            exe = find_main_exe(game_dir, recursive=False) or find_main_exe(game_dir, recursive=True)
             if exe:
                 os.startfile(str(exe))
             else:

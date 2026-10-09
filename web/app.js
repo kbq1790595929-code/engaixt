@@ -5,12 +5,6 @@ function on_meta(key, val) {
         pushLog("error", message);
         const detail = String(failure.technical_detail || "").trim();
         if (detail) pushLog("warn", t("技术详情: ") + detail);
-        const fallback = document.getElementById("krkr-fallback-btn");
-        const canRealtime = failure.fallback === "realtime" || failure.fallback_available === true;
-        if (fallback) {
-            fallback.hidden = !canRealtime;
-            fallback.disabled = !canRealtime;
-        }
         on_status("失败");
     } else if (key === "text_count") {
         document.getElementById("stat-text-count").textContent = val;
@@ -236,11 +230,6 @@ function resetRun() {
         stepEl.textContent = t("就绪");
     }
     hideStats();
-    const fallback = document.getElementById("krkr-fallback-btn");
-    if (fallback) {
-        fallback.hidden = true;
-        fallback.disabled = true;
-    }
 }
 
 // ── Drop Zone ──
@@ -312,6 +301,7 @@ function resetUI() {
     const costStat = document.getElementById("stat-cost-estimate");
     if (costStat) costStat.hidden = true;
     document.getElementById("engine-banner").hidden = true;
+    _updateRealtimeButton(null);
     _engCache = {};
     enableButtons(true);
 }
@@ -333,6 +323,7 @@ async function getEngineInfo(path) {
 async function detectEngine(path) {
     const seq = ++_engineDetectSeq;
     const banner = document.getElementById("engine-banner");
+    _updateRealtimeButton(null);
     if (_engCache[path]) {
         if (seq !== _engineDetectSeq || pathInput.value !== path) return;
         _showEngine(_engCache[path]);
@@ -384,12 +375,23 @@ function _isRealtimeOnlyEngine(info) {
     return ["unity", "xunity_realtime", "unity_arch000_lua"].includes(name);
 }
 
+function _supportsRealtimeTranslation(info) {
+    const name = String(info?.name || "").toLowerCase();
+    return name === "kirikiri" || _isRealtimeOnlyEngine(info);
+}
+
+function _updateRealtimeButton(info) {
+    const button = document.getElementById("realtime-btn");
+    if (button) button.hidden = !_supportsRealtimeTranslation(info);
+}
+
 function _realtimeOnlyMessage(info) {
     const label = info?.label || info?.name || t("当前引擎");
     return `${label} ${t("只能使用“实时翻译”。请点击右侧的“实时翻译”按钮启动，不要走“开始翻译”静态流程。")}`;
 }
 
 function _showEngine(info) {
+    _updateRealtimeButton(info);
     const banner = document.getElementById("engine-banner");
     if (!info || info.name === "error" || info.name === "unknown") {
         banner.hidden = true;
@@ -606,6 +608,8 @@ async function clearCache() {
 async function startRealtime() {
     const path = getPath();
     if (!path) return;
+    const info = await getEngineInfo(path);
+    if (!_supportsRealtimeTranslation(info)) return;
     const src = document.getElementById("src-lang")?.value || "ja";
     const tgt = document.getElementById("tgt-lang")?.value || "zh-CN";
     await _runAction(() => pywebview.api.run_realtime(path, src, tgt), t("实时翻译"));
