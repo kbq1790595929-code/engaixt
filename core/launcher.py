@@ -16,6 +16,9 @@ from core.exe_selector import find_main_exe
 from core.kirikiri_launcher_policy import (
     has_active_kirikiri_root_patch,
     kirikiri_needs_patch_bridge,
+    KIRIKIRI_REALTIME_LAUNCHER_NAME,
+    KIRIKIRI_STATIC_LAUNCHER_NAME,
+    preserve_legacy_kirikiri_realtime_launcher,
 )
 from core.path_resolver import resolve_game_path
 from core.resources import app_root, resource_path
@@ -330,7 +333,62 @@ def create_kirikiri_native_launcher(game_path: Path, engine: object | None = Non
     if not native_launcher:
         return None
     launcher = _write_native_kirikiri_launcher(game_dir, exe_rel, native_launcher, engine=engine)
-    info(f"KiriKiri 汉化启动器已生成: {launcher}")
+    info(f"KiriKiri 实时汉化启动器已生成: {launcher}")
+    return launcher
+
+
+def create_kirikiri_static_launcher(game_path: Path, engine: object | None = None,
+                                     checkpoint: Path | None = None) -> Path | None:
+    """Create the launcher used by the normal KRKR static-patch route.
+
+    The translated game is loaded through KRKR's normal resource lookup. The
+    launcher therefore starts the game executable directly and deploys no
+    native hook DLL or second translation window.
+    """
+    del checkpoint
+    game_path = Path(resolve_game_path(game_path))
+    game_dir = game_path if game_path.is_dir() else game_path.parent
+    exe_path = _select_launch_exe(game_path, engine)
+    if not exe_path:
+        warning("KiriKiri static launcher not created: no executable found")
+        return None
+    exe_rel = _relative_to_dir(exe_path, game_dir)
+    if not exe_rel:
+        warning(f"KiriKiri static launcher not created: executable is outside game directory: {exe_path}")
+        return None
+
+    preserve_legacy_kirikiri_realtime_launcher(game_dir)
+    launcher = game_dir / KIRIKIRI_STATIC_LAUNCHER_NAME
+    # Do not put the Unicode executable name directly in a cmd.exe command.
+    # cmd parses batch files using the active console code page, which turns
+    # paths such as ``王様恋愛.exe`` into a different filename. The encoded
+    # PowerShell payload is ASCII in the batch file and decodes the relative
+    # path as UTF-16 before starting the game's own executable.
+    ps_lines = [
+        "$ErrorActionPreference = 'Stop'",
+        "$GameDir = [Environment]::GetEnvironmentVariable('KIRIKIRI_GAME_DIR', 'Process')",
+        "if ([string]::IsNullOrWhiteSpace($GameDir)) { $GameDir = (Get-Location).Path }",
+        "$GameDir = [System.IO.Path]::GetFullPath($GameDir)",
+        f"$Exe = Join-Path $GameDir {_ps_quote(exe_rel)}",
+        "if (-not (Test-Path -LiteralPath $Exe)) { throw ('Game executable not found: ' + $Exe) }",
+        "$psi = New-Object System.Diagnostics.ProcessStartInfo",
+        "$psi.FileName = $Exe",
+        "$psi.WorkingDirectory = $GameDir",
+        "$psi.UseShellExecute = $false",
+        "[System.Diagnostics.Process]::Start($psi) | Out-Null",
+    ]
+    encoded = base64.b64encode("\r\n".join(ps_lines).encode("utf-16le")).decode("ascii")
+    launcher.write_text(
+        "@echo off\r\n"
+        "setlocal\r\n"
+        "set \"KIRIKIRI_GAME_DIR=%~dp0\"\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand "
+        f"{encoded}\r\n"
+        "endlocal\r\n",
+        encoding="ascii",
+    )
+    info(f"KiriKiri 静态补丁启动器已生成: {launcher}")
     return launcher
 
 
@@ -447,7 +505,7 @@ def launch_kirikiri_native_runtime(
 ) -> bool:
     """Launch KiriKiri through the native display hook without bat/powershell.
 
-    The portable ``启动汉化版.bat`` is still generated for users who want a
+    The portable ``启动实时汉化版.bat`` is still generated for users who want a
     self-contained game folder. GUI realtime launch uses this direct path so it
     does not flash cmd.exe or powershell.exe windows.
     """
@@ -639,7 +697,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launcher: Path, engine: object | None = None) -> Path:
-    launcher = game_dir / "启动汉化版.bat"
+    launcher = game_dir / KIRIKIRI_REALTIME_LAUNCHER_NAME
     native_rel = _relative_to_dir(native_launcher, game_dir) or str(native_launcher)
     overlay_exe, overlay_prefix_args, overlay_cwd, overlay_needs_pythonpath = _overlay_window_launch_spec()
     no_window_timeout = max(10, min(300, int(getattr(get_config(), "kirikiri_no_window_timeout_seconds", 45) or 45)))

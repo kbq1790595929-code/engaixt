@@ -14,6 +14,10 @@ from pathlib import Path
 
 from config import get_config
 from core.engine_capabilities import can_repack
+from core.kirikiri_launcher_policy import (
+    KIRIKIRI_REALTIME_LAUNCHER_NAME,
+    find_kirikiri_static_launcher,
+)
 from core.launcher import (
     create_bgi_hook_launcher,
     create_godot_display_hook_launcher,
@@ -602,9 +606,17 @@ def stop_translation_proxy(engine):
         info("翻译代理服务器已停止")
 
 def auto_select_injector(pipeline, injector: str | None, engine, game_path: Path) -> str | None:
+    engine_name = getattr(engine, "name", "")
+    if engine_name == "kirikiri":
+        if injector:
+            warning("KiriKiri 静态管线不使用注入器；实时翻译请使用独立入口")
+        info("KiriKiri 引擎检测到，使用静态 XP3/脚本补丁，不部署运行时 hook")
+        if pipeline.diagnostics:
+            pipeline.diagnostics.set("injector", None)
+            pipeline.diagnostics.set("kirikiri_launch_route", "static")
+        return None
     if injector:
         return injector
-    engine_name = getattr(engine, "name", "")
     selected: str | None = None
     if engine_name == "xunity_realtime":
         selected = "xunity"
@@ -612,9 +624,6 @@ def auto_select_injector(pipeline, injector: str | None, engine, game_path: Path
     elif engine_name == "bgi":
         selected = None
         info("BGI 引擎检测到，将生成原生免依赖汉化启动器")
-    elif engine_name == "kirikiri":
-        selected = None
-        info("KiriKiri 引擎检测到，默认使用原生显示层 hook，不做静态脚本回填")
     elif engine_name == "godot_pck":
         selected = None
         info("Godot PCK 引擎检测到，使用静态 PCK 回填模式，直接启动 exe 无需 hook")
@@ -647,6 +656,10 @@ def create_runtime_launchers(pipeline, game_path: Path, engine, checkpoint: Path
         pipeline.diagnostics.set(diag_key, str(launcher))
     if pipeline.manifest:
         pipeline.manifest.record_created(launcher, kind="runtime", runtime_required=True)
+        if engine_name == "kirikiri":
+            realtime = launcher.parent / KIRIKIRI_REALTIME_LAUNCHER_NAME
+            if realtime.is_file():
+                pipeline.manifest.record_created(realtime, kind="realtime_launcher", runtime_required=True)
 
 def prepare_runtime_dependencies(pipeline, game_path: Path, engine) -> None:
     if getattr(engine, "name", "") in {"godot", "godot_frida"}:
@@ -1086,11 +1099,22 @@ def _is_runtime_frida_mode(injector: str | None, engine, game_path: Path) -> boo
 
 def _launch_finished_game(game_path: Path, engine, injector: str | None, checkpoint: Path | None) -> bool:
     engine_name = getattr(engine, "name", "") if engine else ""
-    if engine_name in {"bgi", "kirikiri"} and not injector:
+    if engine_name == "kirikiri":
+        game_dir = game_path if game_path.is_dir() else game_path.parent
+        launcher = find_kirikiri_static_launcher(game_dir)
+        if launcher:
+            try:
+                info("通过 KiriKiri 静态汉化启动器启动游戏")
+                launch_translated_launcher(launcher, cwd=game_dir)
+                return True
+            except Exception as exc:
+                warning(f"KiriKiri 静态启动器启动失败，回退普通启动: {exc}")
+        return launch_game(game_path, engine)
+    if engine_name == "bgi" and not injector:
         game_dir = game_path if game_path.is_dir() else game_path.parent
         launcher = game_dir / "启动汉化版.bat"
         if launcher.exists():
-            label = "BGI" if engine_name == "bgi" else "KiriKiri"
+            label = "BGI"
             info(f"通过 {label} 原生汉化启动器启动游戏")
             try:
                 launch_translated_launcher(launcher, cwd=game_dir)

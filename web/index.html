@@ -198,11 +198,8 @@
           <button class="btn btn-primary actions-btn" id="start-btn" onclick="startTranslation()">
             <svg class="ic"><use href="#i-rocket"/></svg>开始翻译
           </button>
-          <button class="btn btn-primary actions-btn" onclick="startRealtime()">
+          <button class="btn btn-primary actions-btn" id="realtime-btn" onclick="startRealtime()" hidden>
             <svg class="ic"><use href="#i-activity"/></svg>实时翻译
-          </button>
-          <button class="btn actions-btn" id="krkr-fallback-btn" onclick="startRealtime()" hidden disabled>
-            <svg class="ic"><use href="#i-activity"/></svg>改用实时翻译
           </button>
           <button class="btn actions-btn" onclick="extractOnly()">
             <svg class="ic"><use href="#i-download"/></svg>仅提取
@@ -431,7 +428,7 @@
           <li><span>拖入游戏目录、游戏 exe、Steam 快捷方式或压缩包；工具会先解析真实目录，再进行引擎识别。</span></li>
           <li><span>查看识别出的引擎和候选结果。普通用户保持“注入方式：自动”即可，管线会按引擎选择静态回填或运行时注入。</span></li>
           <li><span>普通可回填引擎点击“开始翻译”。流程会依次执行提取文本、缓存命中、AI 翻译、校验、回填、生成启动器和写入诊断数据。</span></li>
-          <li><span>KRKR 点击“开始翻译”会先走静态预检、解包、提取、翻译和安全回填；静态阶段失败时会保留原文件，并提供“改用实时翻译”。Unity / XUnity 继续使用“实时翻译”。</span></li>
+          <li><span>KRKR 点击“开始翻译”只走静态预检、解包、提取、翻译和安全回填，不启动字幕窗口；“实时翻译”是独立入口。Unity / XUnity 使用“实时翻译”。</span></li>
           <li><span>完成后优先从“游戏库”启动；也可以进入游戏目录，运行管线生成的汉化启动器或原游戏 exe。</span></li>
         </ol>
       </section>
@@ -445,7 +442,7 @@
           </div>
           <div class="help-note">
             <strong>实时翻译</strong>
-            <span>运行时后备入口。KRKR 静态流程失败后可由用户确认启动原生 hook 与独立字幕窗口；Unity 会部署 XUnity / BepInEx 运行时翻译。</span>
+            <span>独立实时入口。仅在识别为 KRKR 或 Unity 时显示；KRKR 使用原生 hook 与独立字幕窗口，Unity 使用 XUnity / BepInEx。</span>
           </div>
           <div class="help-note">
             <strong>仅提取</strong>
@@ -612,9 +609,9 @@
               <span class="help-status beta">Beta 版</span>
             </div>
             <dl class="engine-help-facts">
-              <div><dt>默认流程</dt><dd>“开始翻译”先执行静态预检、XP3 解包、脚本提取、AI 翻译和安全回填；静态失败时保留原文件，并准备“改用实时翻译”。</dd></div>
-              <div><dt>显示方式</dt><dd>人名和正文分通道处理；已有译文优先读本地映射，新文本可实时补译，并写入 <code>_translation_meta</code> 供后续复用。</dd></div>
-              <div><dt>启动</dt><dd>GUI 实时翻译会直接拉起 native runtime 和字幕窗口，不再经过 bat / PowerShell。目录里的 <code>启动汉化版.bat</code> 只是便携备用入口。</dd></div>
+              <div><dt>默认流程</dt><dd>“开始翻译”仅执行静态预检、XP3 解包、脚本提取、AI 翻译和安全回填；失败时保留原文件，不自动切换实时路线。</dd></div>
+              <div><dt>显示方式</dt><dd>静态译文由游戏自身显示，不启动字幕窗口；实时路线的人名和正文分通道处理，已有译文优先读本地映射。</dd></div>
+              <div><dt>启动</dt><dd><code>启动汉化版.bat</code> 只启动静态汉化版；<code>启动实时汉化版.bat</code> 是独立实时入口。游戏库使用静态入口，不启动字幕窗口。</dd></div>
               <div><dt>静态脚本</dt><dd><code>.ks</code>、<code>.tjs</code>、普通 XP3 / SCN 优先使用内置解析器，失败时按顺序尝试 GARbro、msg-tool 和 VNTextPatch。每个工具都在隔离工作区运行，只有通过产物检查才进入后续阶段。</dd></div>
             </dl>
           </section>
