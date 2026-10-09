@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 from config import get_config
 from core.exe_selector import find_main_exe
 from core.kirikiri_launcher_policy import (
@@ -502,6 +503,7 @@ def launch_kirikiri_native_runtime(
     *,
     hidden: bool = True,
     wait: bool = False,
+    on_log: Callable[[int, str], None] | None = None,
 ) -> bool:
     """Launch KiriKiri through the native display hook without bat/powershell.
 
@@ -509,24 +511,40 @@ def launch_kirikiri_native_runtime(
     self-contained game folder. GUI realtime launch uses this direct path so it
     does not flash cmd.exe or powershell.exe windows.
     """
+    def emit(level: int, message: str) -> None:
+        if on_log is not None:
+            on_log(level, message)
+        elif level >= 30:
+            warning(message)
+        else:
+            info(message)
+
     game_path = Path(resolve_game_path(game_path))
     game_dir = game_path if game_path.is_dir() else game_path.parent
     exe_path = _select_launch_exe(game_path, engine)
     if not exe_path:
-        warning("KiriKiri native realtime launch failed: no executable found")
+        emit(40, "KRKR 实时启动失败: 未找到游戏可执行文件")
         return False
     if not _is_pe_x86(exe_path):
-        warning(f"KiriKiri native realtime launch skipped: {exe_path.name} is not a 32-bit PE executable")
+        emit(40, f"KRKR 实时启动失败: {exe_path.name} 不是支持的 32 位 PE 程序")
         return False
 
     checkpoint_path = _resolve_checkpoint_for_overlay(game_path, checkpoint)
     native_launcher = _prepare_native_kirikiri_runtime(game_dir, checkpoint_path)
     if not native_launcher:
+        emit(40, "KRKR 实时启动失败: 原生运行组件缺失，或 DLL/launcher 无法部署到游戏目录")
         return False
 
     meta_dir = game_dir / "_translation_meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
     start_log = meta_dir / "kirikiri_overlay_start.log"
+    from core.kirikiri_runtime_diagnostics import KirikiriRuntimeDiagnostics
+
+    target_file = meta_dir / "kirikiri_runtime_target.tsv"
+    for session_path in (target_file, meta_dir / "kirikiri_native_launcher.log", meta_dir / "kirikiri_native_hook.log"):
+        session_path.unlink(missing_ok=True)
+    diagnostics = KirikiriRuntimeDiagnostics(meta_dir, emit)
+    overlay_stderr = meta_dir / "kirikiri_overlay_stderr.log"
 
     def log_start(message: str) -> None:
         try:
@@ -547,15 +565,18 @@ def launch_kirikiri_native_runtime(
         exe_path.name,
         str(exe_path),
     )
+    overlay_env["KIRIKIRI_RUNTIME_TARGET_FILE"] = str(target_file)
 
     def start_overlay_window(reason: str) -> subprocess.Popen | None:
         try:
-            started = subprocess.Popen(
-                overlay_cmd,
-                cwd=overlay_cwd,
-                env=overlay_env,
-                creationflags=creationflags,
-            )
+            with overlay_stderr.open("ab") as errors:
+                started = subprocess.Popen(
+                    overlay_cmd,
+                    cwd=overlay_cwd,
+                    env=overlay_env,
+                    creationflags=creationflags,
+                    stderr=errors,
+                )
             log_start(
                 "overlay_started "
                 f"reason={reason} pid={getattr(started, 'pid', '')} "
@@ -564,15 +585,22 @@ def launch_kirikiri_native_runtime(
             return started
         except Exception as exc:
             log_start(f"overlay_start_failed reason={reason}: {exc}")
+            diagnostics.consume(f"overlay_start_failed reason={reason}: {exc}")
             return None
 
     def monitor_overlay_window(native_proc: subprocess.Popen, initial_overlay: subprocess.Popen | None) -> None:
         overlay = initial_overlay
         restart_count = 0
         while native_proc.poll() is None:
+            diagnostics.poll()
+            diagnostics.check_waiting()
             if overlay is None or overlay.poll() is not None:
                 if overlay is not None:
                     log_start(f"overlay_exited exit_code={overlay.returncode}; restarting")
+                    diagnostics.consume(f"overlay_exited exit_code={overlay.returncode}; restarting")
+                if restart_count >= 3:
+                    diagnostics.consume("overlay_start_failed: restart limit reached")
+                    break
                 restart_count += 1
                 overlay = start_overlay_window(f"restart-{restart_count}")
                 if overlay is None:
@@ -581,10 +609,14 @@ def launch_kirikiri_native_runtime(
             time.sleep(0.75)
         if overlay is not None and overlay.poll() is None:
             try:
+                if native_proc.poll() is not None:
+                    overlay.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
                 log_start("overlay_terminate_after_game_exit")
                 overlay.terminate()
             except Exception as exc:
                 log_start(f"overlay_terminate_failed: {exc}")
+        diagnostics.poll()
 
     overlay_proc = start_overlay_window("initial")
 
@@ -610,7 +642,7 @@ def launch_kirikiri_native_runtime(
     native_env["KIRIKIRI_LUNA_CAPTURE_HOOKS"] = capture_hooks
     try:
         proc = subprocess.Popen(
-            [str(native_launcher), str(exe_path), "--wait"],
+            [str(native_launcher), str(exe_path), "--wait", "--quiet"],
             cwd=str(game_dir),
             env=native_env,
             creationflags=creationflags,
@@ -625,12 +657,14 @@ def launch_kirikiri_native_runtime(
         monitor_thread.start()
         if wait:
             proc.wait()
-            monitor_thread.join(timeout=3.0)
-            return proc.returncode == 0
+            if monitor_thread is not None:
+                monitor_thread.join(timeout=4.0)
+            return diagnostics.finish(proc.returncode)
         return True
     except Exception as exc:
         warning(f"KiriKiri native realtime launch failed: {exc}")
         log_start(f"native_launch_failed: {exc}")
+        emit(40, f"KRKR 原生启动失败: {exc}")
         try:
             if overlay_proc and overlay_proc.poll() is None:
                 overlay_proc.terminate()
@@ -731,6 +765,9 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         f"$UseOverlay = {'$true' if use_overlay else '$false'}",
         f"$UsePatchBridgeLoader = {'$true' if use_patch_bridge_loader else '$false'}",
         "$OverlayStartLog = Join-Path $GameDir '_translation_meta\\kirikiri_overlay_start.log'",
+        "$RuntimeTarget = Join-Path $GameDir '_translation_meta\\kirikiri_runtime_target.tsv'",
+        "$env:KIRIKIRI_RUNTIME_TARGET_FILE = $RuntimeTarget",
+        "if (Test-Path -LiteralPath $RuntimeTarget) { Remove-Item -LiteralPath $RuntimeTarget }",
         "$GameName = Split-Path -Leaf $GameDir",
         "$GameExeName = [System.IO.Path]::GetFileName($Exe)",
         "function Fail([string]$Message) { Write-Host $Message -ForegroundColor Red; Read-Host 'Press Enter to close'; exit 1 }",
@@ -762,6 +799,14 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         "  return $null",
         "}",
         "function GetGameProcessInfo {",
+        "  if (Test-Path -LiteralPath $RuntimeTarget) {",
+        "    try {",
+        "      $target = (Get-Content -LiteralPath $RuntimeTarget -Raw -Encoding UTF8).Trim() -split \"`t\", 3",
+        "      if ($target.Length -eq 3 -and $target[1] -in @('starting', 'running')) {",
+        "        return Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$target[0])",
+        "      }",
+        "    } catch {}",
+        "  }",
         "  Get-CimInstance Win32_Process -Filter (\"name='\" + $GameExeName.Replace(\"'\", \"''\") + \"'\") | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $Exe) } | Select-Object -First 1",
         "}",
         "function HasVisibleGameWindow([int]$ProcessId) {",

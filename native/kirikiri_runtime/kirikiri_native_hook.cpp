@@ -6,6 +6,7 @@
 #include "kirikiri_embed_trace.h"
 #include "kirikiri_patch_stream.h"
 #include "kirikiri_psb_runtime.h"
+#include "kirikiri_runtime_text.h"
 
 #include <algorithm>
 #include <climits>
@@ -161,12 +162,14 @@ std::mutex gDumpMutex;
 std::mutex gStorageMutex;
 std::mutex gInternalTextMutex;
 std::mutex gRuntimeCaptureMutex;
+std::mutex gRuntimeConfirmedTextMutex;
 std::mutex gOverlayMutex;
 std::mutex gSpeakerMutex;
 std::mutex gModulePatchMutex;
 std::unordered_map<std::wstring, std::wstring> gTranslations;
 std::unordered_map<std::wstring, std::wstring> gPlaceholders;
 std::unordered_set<std::wstring> gRuntimeCapturedTexts;
+std::unordered_set<std::wstring> gRuntimeConfirmedTexts;
 std::unordered_map<std::wstring, HFONT> gFontCache;
 std::vector<wchar_t> gSjisTunnelTable;
 std::unordered_map<iTVPStorageMedia *, StorageMediaOpen_t> gStorageMediaOpenOriginal;
@@ -237,6 +240,7 @@ volatile LONG gInternalEmbedKrkr2SlotApplied = 0;
 volatile LONG gInternalEmbedKrkr2SlotWriteFailures = 0;
 volatile LONG gInternalKrkr2WcsHits = 0;
 volatile LONG gRuntimeOverlayMissSamples = 0;
+volatile LONG gRuntimeUtf8DeferredCount = 0;
 volatile LONG gRuntimeTextCaptureCount = 0;
 volatile LONG gRuntimeSpeakerCaptureCount = 0;
 volatile LONG gRuntimeCaptureDuplicateSkips = 0;
@@ -282,7 +286,7 @@ constexpr const wchar_t *kChineseFontFaceW = L"Microsoft YaHei UI";
 constexpr const char *kChineseFontFaceA = "Microsoft YaHei UI";
 constexpr BYTE kChineseCharset = GB2312_CHARSET;
 constexpr BYTE kFontQuality = CLEARTYPE_QUALITY;
-constexpr const wchar_t *kHookBuildTag = L"2026-07-24-krkr-wide-slot-v29";
+constexpr const wchar_t *kHookBuildTag = L"2026-10-10-krkr-text-provenance-v31";
 constexpr const wchar_t *kTunnelAlphabet = L"０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ";
 constexpr wchar_t kTunnelPrefix = L'〓';
 constexpr int kTunnelAlphabetSize = 36;
@@ -371,8 +375,8 @@ bool ContainsEmbedKrkrZChatFlag(const std::wstring &s) {
 
 void Log(const std::wstring &message) {
     if (gLogPath.empty()) return;
-    std::string line = WideToUtf8(message + L"\r\n");
-    HANDLE h = CreateFileW(gLogPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    std::string line = WideToUtf8(L"[pid=" + std::to_wstring(GetCurrentProcessId()) + L"] " + message + L"\r\n");
+    HANDLE h = CreateFileW(gLogPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) return;
     DWORD written = 0;
     WriteFile(h, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
@@ -1032,7 +1036,11 @@ bool LooksLikeRuntimeMojibake(const std::wstring &text) {
 bool IsInternalCandidateText(const std::wstring &src) {
     std::wstring trimmed = TrimWide(src);
     if (trimmed.empty() || trimmed.size() > 1200) return false;
-    if (!ContainsJapanese(trimmed)) return false;
+    if (kirikiri_text::IsPunctuationOnly(trimmed)) return true;
+    // Japanese dialogue can be a pure-kanji word (e.g. 勝利 or 選択肢),
+    // while short reactions may contain only one kana.  Requiring kana here
+    // silently drops both classes before they reach the realtime translator.
+    if (!ContainsJapanese(trimmed) && !ContainsCjk(trimmed)) return false;
     if (LooksLikeRuntimeMojibake(trimmed)) return false;
     if (IsPathLikeText(trimmed)) return false;
     if (trimmed[0] == L'[' || trimmed[0] == L'@' || trimmed[0] == L'*' || trimmed[0] == L';') return false;
@@ -1095,6 +1103,15 @@ void PublishRuntimeOverlayText(
         visible = RuntimeVisibleText(sourceText);
     }
     if (!IsInternalCandidateText(visible)) return;
+    if (kirikiri_text::IsPunctuationOnly(visible)) {
+        WriteToOverlay(visible, visible, L"");
+        return;
+    }
+    if (sourceLabel && wcscmp(sourceLabel, L"embed_krkrz_utf8") != 0) {
+        std::lock_guard<std::mutex> lock(gRuntimeConfirmedTextMutex);
+        if (gRuntimeConfirmedTexts.size() >= 4096) gRuntimeConfirmedTexts.clear();
+        gRuntimeConfirmedTexts.insert(CompactWideText(visible));
+    }
     const std::wstring *translated = nullptr;
     if (!visibleOverride.empty()) {
         translated = FindTranslationVariant(visible);
@@ -1318,14 +1335,41 @@ bool TryWriteNarrowCursor(const char **cursor, const char *value) {
 const wchar_t *ResolveInternalWideReplacement(const wchar_t *text, int maxChars, volatile LONG *hitCounter) {
     if (!text) return text;
     std::wstring src;
-    if (!TryReadWideCString(text, maxChars, &src)) return text;
-    if (hitCounter) InterlockedIncrement(hitCounter);
-    if (CaptureRuntimeSpeakerCommand(src)) {
+    if (!TryReadWideCString(text, maxChars, &src)) {
+        LONG sample = InterlockedIncrement(&gInternalWideSampleCount);
+        if (sample <= 80) {
+            Log(L"[kirikiri native] internal wide sample read_failed ptr=" +
+                std::to_wstring(reinterpret_cast<uintptr_t>(text)) +
+                L" max=" + std::to_wstring(maxChars));
+        }
         return text;
     }
+    if (hitCounter) InterlockedIncrement(hitCounter);
+    LONG sample = InterlockedIncrement(&gInternalWideSampleCount);
+    bool speakerCommand = CaptureRuntimeSpeakerCommand(src);
     std::wstring visible = RuntimeVisibleText(src);
-    if (!IsInternalCandidateText(visible)) return text;
-    const std::wstring *translated = FindTranslationVariant(src);
+    bool candidate = IsInternalCandidateText(visible);
+    const std::wstring *translated = nullptr;
+    if (candidate && !speakerCommand) {
+        translated = FindTranslationVariant(src);
+    }
+    if (sample <= 80) {
+        Log(L"[kirikiri native] internal wide sample=" + std::to_wstring(sample) +
+            L" raw=\"" + EscapeLogText(src) +
+            L"\" visible=\"" + EscapeLogText(visible) +
+            L"\" len=" + std::to_wstring(src.size()) +
+            L" speaker=" + (speakerCommand ? L"1" : L"0") +
+            L" candidate=" + (candidate ? L"1" : L"0") +
+            L" translated=" + (translated ? L"1" : L"0"));
+    }
+    if (speakerCommand) {
+        return text;
+    }
+    if (!candidate) return text;
+    if (kirikiri_text::IsPunctuationOnly(visible)) {
+        PublishRuntimeOverlayText(src, L"internal_wide", visible);
+        return text;
+    }
     if (!translated || translated->empty()) {
         InterlockedIncrement(&gInternalMissCount);
         PublishRuntimeOverlayText(src, L"internal_wide");
@@ -1339,10 +1383,7 @@ const wchar_t *ResolveInternalWideReplacement(const wchar_t *text, int maxChars,
 
     PublishRuntimeOverlayText(src, L"internal_wide");
 
-    // 检查是否需要嵌入
-    bool kagDisplayReplacement =
-        IsEmbedTextReplacementEnabled() && hitCounter == &gInternalKagHits;
-    if (!gVmTextReplacement && !kagDisplayReplacement) {
+    if (!gVmTextReplacement && !IsEmbedTextReplacementEnabled()) {
         // 不嵌入，但文本已经通过 PublishRuntimeOverlayText 发送到字幕窗口
         return text;
     }
@@ -1485,6 +1526,10 @@ extern "C" __declspec(dllexport) const wchar_t *__stdcall KiriKiriResolveTextRen
     std::wstring visible = NormalizeTextRenderVisible(source);
     if (!IsInternalCandidateText(visible)) return text;
     if (hitCounter) InterlockedIncrement(hitCounter);
+    if (kirikiri_text::IsPunctuationOnly(visible)) {
+        PublishRuntimeOverlayText(source, L"textrender", visible);
+        return text;
+    }
 
     const std::wstring *translated = FindTranslationVariant(source);
     if (!translated) translated = FindTranslationVariant(visible);
@@ -1524,7 +1569,8 @@ extern "C" __declspec(dllexport) const char *__stdcall KiriKiriCaptureInternalUt
     if (!TryReadNarrowCString(text, maxBytes, &raw)) return text;
     if (!kirikiri_embed::PassesEmbedKrkrZFilter(raw)) return text;
     std::wstring wide = Utf8ToWide(raw);
-    if (!ContainsEmbedKrkrZChatFlag(wide)) return text;
+    if (LooksLikeEmbedKrkrZScript(wide)) return text;
+    if (!kirikiri_text::IsPunctuationOnly(wide) && !ContainsEmbedKrkrZChatFlag(wide)) return text;
     if (CaptureRuntimeSpeakerCommand(wide)) {
         if (hitCounter) InterlockedIncrement(hitCounter);
         return text;
@@ -1532,8 +1578,24 @@ extern "C" __declspec(dllexport) const char *__stdcall KiriKiriCaptureInternalUt
     std::string visibleUtf8 = kirikiri_embed::NormalizeEmbedKrkrZText(raw);
     std::wstring visible = RuntimeVisibleText(Utf8ToWide(visibleUtf8));
     if (!IsInternalCandidateText(visible)) return text;
+    if (!kirikiri_text::HasUtf8DialogueEvidence(wide, visible)) {
+        bool confirmed = false;
+        {
+            std::lock_guard<std::mutex> lock(gRuntimeConfirmedTextMutex);
+            confirmed = gRuntimeConfirmedTexts.count(CompactWideText(visible)) != 0;
+        }
+        if (!confirmed) {
+            LONG sample = InterlockedIncrement(&gRuntimeUtf8DeferredCount);
+            if (sample <= 24) {
+                Log(L"[kirikiri native] runtime_utf8_deferred reason=unconfirmed_identifier text=" +
+                    ShortLogText(visible, 80));
+            }
+            return text;
+        }
+    }
     if (hitCounter) InterlockedIncrement(hitCounter);
     PublishRuntimeOverlayText(wide, L"embed_krkrz_utf8", visible);
+    if (kirikiri_text::IsPunctuationOnly(visible)) return text;
     return kirikiri_embed::ResolveUtf8(text, raw, WideToUtf8(visible));
 }
 
@@ -1870,6 +1932,10 @@ const wchar_t *ResolveKagParserArgument(const wchar_t *text, int maxChars) {
             Log(L"[kirikiri native] kag skip: raw=" + ShortLogText(TrimWide(src)) +
                 L" visible=" + ShortLogText(visible));
         }
+        return text;
+    }
+    if (kirikiri_text::IsPunctuationOnly(visible)) {
+        PublishRuntimeOverlayText(src, L"kagparser", visible);
         return text;
     }
     if (!src.empty() && src[0] == L'@') {
@@ -5776,8 +5842,10 @@ DWORD WINAPI InitThread(void *) {
     EnsureDirectory(metaDir);
     gLogPath = JoinPath(metaDir, L"kirikiri_native_hook.log");
     gRuntimeCapturePath = JoinPath(metaDir, L"kirikiri_runtime_capture.jsonl");
-    DeleteFileW(gLogPath.c_str());
     Log(L"[kirikiri native] init");
+    wchar_t imagePath[MAX_PATH * 4] = {};
+    GetModuleFileNameW(nullptr, imagePath, MAX_PATH * 4);
+    Log(L"[kirikiri native] process pid=" + std::to_wstring(GetCurrentProcessId()) + L" exe=" + imagePath);
     Log(std::wstring(L"[kirikiri native] build=") + kHookBuildTag);
     Log(L"[kirikiri native] engine behavior reference: KiriKiri engine32 KAGParser/TextRender contracts");
     Log(L"[kirikiri native] engine layout reference=KRKRZ fd5c4ba tjs2/tjsVariantString.h");
@@ -5889,6 +5957,7 @@ DWORD WINAPI DumpFlushThread(void *) {
             L" embed_wide_slot_write_fail=" + std::to_wstring(gInternalEmbedKrkr2SlotWriteFailures) +
             L" krkr2wcs_hits=" + std::to_wstring(gInternalKrkr2WcsHits) +
             L" overlay_miss=" + std::to_wstring(gRuntimeOverlayMissSamples) +
+            L" utf8_deferred=" + std::to_wstring(gRuntimeUtf8DeferredCount) +
             L" text_captures=" + std::to_wstring(gRuntimeTextCaptureCount) +
             L" speaker_captures=" + std::to_wstring(gRuntimeSpeakerCaptureCount) +
             L" capture_duplicates=" + std::to_wstring(gRuntimeCaptureDuplicateSkips) +
