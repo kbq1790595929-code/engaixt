@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterable
 
 from config import get_config
-from translators.base import retry_with_backoff
+from translators.base import close_async_client, retry_with_backoff
 from utils.arc20 import parse_arc20
 from utils.bgi_dsc import (
     BGI_V1_MAGIC,
@@ -316,7 +316,10 @@ async def rewrite_bgi_slots(
                     _save_cache(cache_path, cache)
                     dirty = False
 
-    await asyncio.gather(*(run_one(candidate) for candidate in pending))
+    try:
+        await asyncio.gather(*(run_one(candidate) for candidate in pending))
+    finally:
+        await close_async_client(client, "BGI AI")
     _save_cache(cache_path, cache)
     report = {**stats, "items": report_items, "rejected_items": rejected_items}
     return rewrites, report

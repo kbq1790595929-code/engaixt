@@ -11,7 +11,7 @@ from typing import Any
 
 from config import get_config
 from engines.base import TextItem
-from translators.base import retry_with_backoff
+from translators.base import close_async_client, retry_with_backoff
 from translators.cache import (
     get_cache,
 )
@@ -186,7 +186,10 @@ class DeepSeekPolisher:
                     except Exception:
                         pass
 
-        await asyncio.gather(*(run_batch(batch) for batch in batches))
+        try:
+            await asyncio.gather(*(run_batch(batch) for batch in batches))
+        finally:
+            await close_async_client(client, "文本润色")
         for item in candidates:
             _mark_polished(item)
         return PolishResult(items, stats)

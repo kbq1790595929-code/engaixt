@@ -1289,6 +1289,11 @@ def _overlay_window_command(
             root if not env.get("PYTHONPATH")
             else root + os.pathsep + env["PYTHONPATH"]
         )
+    # The overlay writes diagnostics through Python's stderr. On Windows the
+    # inherited stream otherwise uses the system code page, while the GUI
+    # diagnostics reader consumes the file as UTF-8.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     args = [exe, *prefix_args, game_name, game_exe, game_exe_path]
     if shm_name:
         args.append(shm_name)

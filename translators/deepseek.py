@@ -9,7 +9,12 @@ from typing import Any, Iterator
 
 from config import get_config
 from engines.base import TextItem
-from translators.base import TranslatorBase, retry_with_backoff
+from translators.base import (
+    TranslatorBase,
+    close_async_client,
+    is_runtime_translation_request,
+    retry_with_backoff,
+)
 from translators.cache import CacheLookupRequest, get_cache
 from translators.deepseek_runtime_mixin import DeepSeekRuntimeMixin
 from translators.deepseek_batch_json import (
@@ -101,6 +106,11 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
         if not items:
             return items
 
+        runtime_request = is_runtime_translation_request(items)
+        if runtime_request and not getattr(self, "_runtime_session_active", False):
+            self._runtime_api_request_count = 0
+        self._runtime_session_active = runtime_request
+        self._active_runtime_request = runtime_request
         self._translation_started_at = time.perf_counter()
         self._first_api_request_recorded = False
         config = get_config()
@@ -109,7 +119,8 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
         cache.stats.dedupe_saved += pending_duplicates
 
         if not pending:
-            info(f"全部 {len(items)} 条已翻译或命中缓存，跳过")
+            if not runtime_request:
+                info(f"全部 {len(items)} 条已翻译或命中缓存，跳过")
             if on_progress:
                 on_progress(len(items), len(items))
             return items
@@ -132,12 +143,13 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
         completed = len(items) - sum(p.occurrences for p in pending)
         total = len(items)
         produced_batches = 0
-        info(
-            f"使用 {self.label} 流式结构化批处理翻译 {len(pending)} 条唯一文本"
-            f"（按内容量自然分批，输入≤{self.MAX_INPUT_TOKENS}/输出≤{self.MAX_OUTPUT_TOKENS} tokens，"
-            f"≤{self.MAX_BATCH_ITEMS} 条/批，{worker_count} 并发，合并 {pending_duplicates} 条重复文本）"
-        )
-        info(f"DeepSeek 批量配置: 顺序组批，由输入/输出 token 预算 + 条数上限决定批次大小")
+        if not runtime_request:
+            info(
+                f"使用 {self.label} 流式结构化批处理翻译 {len(pending)} 条唯一文本"
+                f"（按内容量自然分批，输入≤{self.MAX_INPUT_TOKENS}/输出≤{self.MAX_OUTPUT_TOKENS} tokens，"
+                f"≤{self.MAX_BATCH_ITEMS} 条/批，{worker_count} 并发，合并 {pending_duplicates} 条重复文本）"
+            )
+            info("DeepSeek 批量配置: 顺序组批，由输入/输出 token 预算 + 条数上限决定批次大小")
         if on_progress:
             try:
                 on_progress(completed, total)
@@ -157,7 +169,8 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
                     if produced_batches == 1:
                         elapsed = round(time.perf_counter() - self._translation_started_at, 3)
                         cache.stats.first_batch_ready_seconds = elapsed
-                        info(f"DeepSeek 首批已就绪: {elapsed:.3f}s，开始发送 API 请求")
+                        if not runtime_request:
+                            info(f"DeepSeek 首批已就绪: {elapsed:.3f}s，开始发送 API 请求")
                     await queue.put(batch)
                     if produced_batches == 1:
                         await asyncio.sleep(0)
@@ -210,13 +223,18 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
                     queue.task_done()
 
         producer_task = asyncio.create_task(produce_batches())
-        worker_results = await asyncio.gather(
-            *(worker(i) for i in range(worker_count)),
-            return_exceptions=True,
-        )
-        await producer_task
+        worker_results = []
+        try:
+            worker_results = await asyncio.gather(
+                *(worker(i) for i in range(worker_count)),
+                return_exceptions=True,
+            )
+            await producer_task
+        finally:
+            await close_async_client(client, self.label)
         results.extend(r for r in worker_results if isinstance(r, BaseException))
-        info(f"DeepSeek 流式分批完成: {produced_batches} 批")
+        if not runtime_request:
+            info(f"DeepSeek 流式分批完成: {produced_batches} 批")
         for result in results:
             if isinstance(result, BaseException):
                 warning(f"批处理任务异常: {result}")
@@ -595,6 +613,7 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
             except Exception as e:
                 if json_mode and self._should_retry_without_response_format(e):
                     kwargs.pop("response_format", None)
+                    self._record_first_api_request(cache)
                     resp = await client.chat.completions.create(**kwargs)
                 elif self._is_fatal_api_error(e):
                     raise _FatalApiError(self._summarize_fatal_api_error(e)) from e
@@ -624,6 +643,11 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
             raise
 
     def _record_first_api_request(self, cache) -> None:
+        if getattr(self, "_active_runtime_request", False):
+            count = int(getattr(self, "_runtime_api_request_count", 0)) + 1
+            self._runtime_api_request_count = count
+            info(f"{self.label} 实时 API 请求 #{count} 已开始")
+            return
         if getattr(self, "_first_api_request_recorded", False) or not hasattr(self, "_translation_started_at"):
             return
         self._first_api_request_recorded = True

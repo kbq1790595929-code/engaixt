@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from abc import ABC, abstractmethod
 from engines.base import TextItem
 from utils.text_extract import (
@@ -9,6 +10,44 @@ from utils.text_extract import (
     restore_placeholders,
     verify_translation,
 )
+from utils.logger import warning
+
+
+def is_runtime_translation_request(items: list[TextItem]) -> bool:
+    """Return whether a batch belongs to the one-line runtime translation path."""
+    if len(items) != 1:
+        return False
+    item = items[0]
+    meta = getattr(item, "meta", {}) or {}
+    if meta.get("realtime_request"):
+        return True
+    file_name = str(getattr(item, "file", "") or "").replace("\\", "/").lower()
+    if file_name in {
+        "__realtime__.jsonl",
+        "__kirikiri_live__.jsonl",
+        "__fallback_realtime__.jsonl",
+    }:
+        return True
+    return str(getattr(item, "context", "") or "").lower() == "realtime"
+
+
+async def close_async_client(client, label: str = "API") -> None:
+    """Close an async provider client before its event loop is torn down.
+
+    The realtime overlay creates a short-lived event loop for each captured
+    line. Leaving an httpx-backed async client for garbage collection makes
+    httpx schedule ``aclose()`` after that loop has already closed, producing
+    a noisy and misleading ``Task exception was never retrieved`` traceback.
+    """
+    close = getattr(client, "close", None)
+    if not callable(close):
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:
+        warning(f"{label} 客户端关闭失败: {exc}")
 
 
 async def retry_with_backoff(fn, max_retries=3, base_delay=2.0):

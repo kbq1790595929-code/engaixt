@@ -2,10 +2,42 @@
 from __future__ import annotations
 
 import ctypes
+import locale
+import os
 import re
 import time
 from pathlib import Path
 from typing import Callable
+
+
+def _decode_log_line(data: bytes) -> str:
+    """Decode both new UTF-8 logs and legacy Windows code-page lines."""
+    if data.startswith(b"\xef\xbb\xbf"):
+        data = data[3:]
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    candidates: list[str] = []
+    if os.name == "nt":
+        candidates.append("mbcs")
+    preferred = locale.getpreferredencoding(False)
+    if preferred:
+        candidates.append(preferred)
+    candidates.extend(("gbk", "cp936", "cp932", "shift_jis"))
+    candidates.append("cp1252")
+    seen: set[str] = set()
+    for encoding in candidates:
+        key = encoding.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            return data.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 class KirikiriRuntimeDiagnostics:
@@ -25,6 +57,7 @@ class KirikiriRuntimeDiagnostics:
         self.captures = 0
         self.displays = 0
         self.errors: list[str] = []
+        self._ignored_overlay_traceback = False
         self.started_at = time.monotonic()
 
     def _once(self, key: str, level: int, message: str) -> None:
@@ -46,7 +79,29 @@ class KirikiriRuntimeDiagnostics:
                 lines = (self.pending[path] + data).split(b"\n")
                 self.pending[path] = lines.pop()
                 for line in lines:
-                    text = line.decode("utf-8", errors="replace").strip()
+                    text = _decode_log_line(line).strip()
+                    if path.name == "kirikiri_overlay_stderr.log":
+                        # Older overlay builds created an async httpx client
+                        # in a short-lived event loop and let it close during
+                        # garbage collection. This traceback is transport
+                        # cleanup noise, not a KRKR hook or translation failure.
+                        if self._ignored_overlay_traceback:
+                            if "RuntimeError: Event loop is closed" in text:
+                                self._ignored_overlay_traceback = False
+                                continue
+                            if text.startswith("["):
+                                self._ignored_overlay_traceback = False
+                            else:
+                                continue
+                        if (
+                            "Task exception was never retrieved" in text
+                            or (
+                                "AsyncClient.aclose" in text
+                                and ("future:" in text or "coro=" in text)
+                            )
+                        ):
+                            self._ignored_overlay_traceback = True
+                            continue
                     if text and path.name == "kirikiri_overlay_stderr.log":
                         upper = text.upper()
                         if "TRACEBACK" in upper or "ERROR" in upper or "EXCEPTION" in upper or "FAILED" in upper:

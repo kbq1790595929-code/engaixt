@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from engines.base import TextItem
-from translators.base import TranslatorBase, retry_with_backoff
+from translators.base import TranslatorBase, close_async_client, is_runtime_translation_request, retry_with_backoff
 from translators.cache import get_cache
 from config import get_config
 from utils.logger import info, debug, warning
@@ -24,6 +24,7 @@ class OpenAITranslator(TranslatorBase):
     ) -> list[TextItem]:
         config = get_config()
         cache = get_cache()
+        runtime_request = is_runtime_translation_request(items)
 
         untranslated = []
         for item in items:
@@ -36,7 +37,8 @@ class OpenAITranslator(TranslatorBase):
 
         total = len(untranslated)
         if total == 0:
-            info(f"全部 {len(items)} 条命中缓存，跳过翻译")
+            if not runtime_request:
+                info(f"全部 {len(items)} 条命中缓存，跳过翻译")
             if on_progress:
                 on_progress(len(items), len(items))
             return items
@@ -48,7 +50,8 @@ class OpenAITranslator(TranslatorBase):
             return items
 
         concurrency = max(1, config.max_concurrency)
-        info(f"使用 OpenAI 翻译 {total} 条文本（{concurrency} 并发，{len(items) - total} 条命中缓存）")
+        if not runtime_request:
+            info(f"使用 OpenAI 翻译 {total} 条文本（{concurrency} 并发，{len(items) - total} 条命中缓存）")
 
         # 立即上报初始进度
         if on_progress:
@@ -140,7 +143,10 @@ class OpenAITranslator(TranslatorBase):
             return item
 
         tasks = [translate_one(item) for item in untranslated]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            await close_async_client(client, "OpenAI")
         valid = []
         for r in results:
             if isinstance(r, BaseException):
