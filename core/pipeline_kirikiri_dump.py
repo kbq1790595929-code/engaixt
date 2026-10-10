@@ -1169,7 +1169,10 @@ def _prepare_kirikiri_krkrpatch_runtime(game_dir: Path, exe_path: Path, patch_ar
                 {
                     "gameExecutableFile": game_exe_rel,
                     "gameCommandLine": "",
-                    "logLevel": 1,
+                    # KrkrPatch level 4 includes the Find/Open diagnostics
+                    # needed to prove that protected scenario files are
+                    # actually being served from the translation patch.
+                    "logLevel": 4,
                     "patchProtocols": ["arc://", "archive://"],
                     "patchArchives": patch_archives,
                     "patchNoProtocol": True,

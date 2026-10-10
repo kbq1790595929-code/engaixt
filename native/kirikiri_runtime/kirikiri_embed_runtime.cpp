@@ -311,7 +311,10 @@ void Initialize(const std::wstring &gameDir, bool enabled, DWORD waitTimeoutMs, 
 }
 
 bool PassesEmbedKrkrZFilter(const std::string &text) {
-    if (text.empty() || text.size() > 2000) return false;
+    // This gate is also used by the realtime overlay capture path. Do not
+    // require sentence punctuation here: short reactions and onomatopoeia
+    // such as "えっ" or "ドン" are valid visible game text.
+    if (text.empty() || text.size() > 4096) return false;
     bool hasNonAscii = false;
     for (unsigned char ch : text) {
         if (ch >= 0x80) {
@@ -319,14 +322,7 @@ bool PassesEmbedKrkrZFilter(const std::string &text) {
             break;
         }
     }
-    if (!hasNonAscii) return false;
-    static const char *flags[] = {
-        u8"（", u8"）", u8"。", u8"「", u8"」", u8"『", u8"』", u8"？", u8"！", u8"、", u8"―",
-    };
-    for (const char *flag : flags) {
-        if (text.find(flag) != std::string::npos) return true;
-    }
-    return false;
+    return hasNonAscii;
 }
 
 bool IsNumericPercentToken(const std::string &token) {

@@ -84,6 +84,7 @@ from engines.kirikiri.extract_progress import (
     should_report_item,
 )
 from engines.kirikiri.patch_policy import changed_items_require_stream_bridge
+from engines.kirikiri.fonts import prepare_kirikiri_cjk_font_patch
 from engines.kirikiri.spans import (
     _allow_plain_kag_script,
     _clean_runtime_capture_text,
@@ -132,9 +133,9 @@ class KiriKiriEngine(EngineBase):
             "可解析 KiriKiri/PSB 型 .txt.scn，优先抽取 scenes/texts/selects。",
             "内置 XP3 解析器会优先只提取脚本文件；可用 GARbro.Console 时作为补充解包。",
             "回填会保持脚本原编码；必要时回退到 UTF-16 BOM 容纳中文。",
-            "默认不做静态脚本回填；翻译完成后生成 x86 原生汉化启动器，在显示层用本地译文表替换文本。",
-            "patch.xp3/脚本回填保留为实验开关，只有显式启用 kirikiri_enable_static_patch 时才使用。",
-            "保护/混淆脚本默认不会启动 dump；提取不到时应先捕获运行时文本，再走离线批量翻译。",
+            "默认使用静态脚本/XP3 补丁；翻译完成后让游戏按自身资源加载顺序读取译文。",
+            "不部署 KRKR native hook 或第二窗口；受保护 XP3 优先保留原过滤方式生成静态补丁。",
+            "保护/混淆脚本默认不会启动 dump；提取不到时报告静态工具缺口，不自动切换运行时 hook。",
         ),
     )
     detect_priority = 74
@@ -142,8 +143,8 @@ class KiriKiriEngine(EngineBase):
         "不处理加密 XP3、PIMG 与厂商魔改封包；PSB/SCN 仅覆盖可正常读出的 KiriKiri scenes/texts/selects。",
         "保护/混淆 XP3 可能只能读到索引；标准 FE FE 加扰脚本可处理，非标准加密默认阻断，避免运行时 dump 影响桌面环境。",
         "没有 GARbro.Console 时仍会尝试内置 XP3 脚本提取和目录内已解包明文脚本。",
-        "静态 patch.xp3/补丁加载层为实验路径，默认禁用，避免不同 KRKR 魔改保护导致启动报错。",
-        "运行时 hook 默认不实时请求 API；它只捕获缺失文本或预加载本地译文。",
+        "静态 patch.xp3/补丁加载层依赖游戏自身的资源查找规则；特殊保护可能需要对应的静态桥接工具。",
+        "KRKR 默认不启用运行时 hook；静态提取失败时报告缺口，避免半成品启动器误导用户。",
     ]
 
     _SCRIPT_EXTS = {".ks", ".tjs", ".scn"}
@@ -323,6 +324,7 @@ class KiriKiriEngine(EngineBase):
         if not hasattr(self, "_static_external_tool_attempts"):
             self._static_external_tool_attempts = []
         self._static_repack_failed_files = []
+        self._kirikiri_font_patch_filters: dict[str, dict[str, object]] = {}
         changed: dict[str, list[TextItem]] = {}
         for item in items:
             if _is_kirikiri_control_text_item(item):
@@ -378,6 +380,16 @@ class KiriKiriEngine(EngineBase):
                     "KiriKiri 静态回填仍有脚本失败: "
                     + ", ".join(sorted(failed_files)[:8])
                 )
+
+        font_patch = prepare_kirikiri_cjk_font_patch(
+            original_dir,
+            getattr(self, "_script_meta", {}),
+        )
+        if font_patch.files:
+            for path in font_patch.files:
+                if path not in modified_files:
+                    modified_files.append(path)
+            self._kirikiri_font_patch_filters = dict(font_patch.filters_by_rel or {})
 
         if not modified_files:
             warning("KiriKiri 没有成功修改任何脚本文件")
@@ -442,6 +454,18 @@ class KiriKiriEngine(EngineBase):
                 patch_changed,
                 neutralize_koihazi=use_native_root_patch,
             )
+            for rel, xp3_filter in self._kirikiri_font_patch_filters.items():
+                font_filter = dict(xp3_filter)
+                if (
+                    use_native_root_patch
+                    and str(font_filter.get("kind") or "") == "koihazi_xp3dec"
+                ):
+                    font_filter = {
+                        "kind": "koihazi_xp3dec",
+                        "file_hash": 0,
+                        "neutralized": True,
+                    }
+                patch_filters.setdefault(rel, font_filter)
             self._write_patch_archive(
                 patch_path,
                 original_dir,
@@ -507,14 +531,27 @@ class KiriKiriEngine(EngineBase):
                             and self._should_use_native_root_patch(game_dir, remaining_changed)
                             and not runtime_resource_overlay
                         )
+                        remaining_patch_filters = _collect_xp3_patch_filters(
+                            remaining_changed,
+                            neutralize_koihazi=remaining_use_native_root_patch,
+                        )
+                        for rel, xp3_filter in self._kirikiri_font_patch_filters.items():
+                            font_filter = dict(xp3_filter)
+                            if (
+                                remaining_use_native_root_patch
+                                and str(font_filter.get("kind") or "") == "koihazi_xp3dec"
+                            ):
+                                font_filter = {
+                                    "kind": "koihazi_xp3dec",
+                                    "file_hash": 0,
+                                    "neutralized": True,
+                                }
+                            remaining_patch_filters.setdefault(rel, font_filter)
                         self._write_patch_archive(
                             patch_path,
                             original_dir,
                             remaining_files,
-                            filters_by_rel=_collect_xp3_patch_filters(
-                                remaining_changed,
-                                neutralize_koihazi=remaining_use_native_root_patch,
-                            ),
+                            filters_by_rel=remaining_patch_filters,
                             include_basename_aliases=True,
                         )
                         if use_patch_bridge or runtime_resource_overlay:
@@ -912,7 +949,14 @@ class KiriKiriEngine(EngineBase):
             role = str(raw.get("role") or "text").strip().lower()
             if role not in {"", "text", "message"}:
                 continue
-            text = _clean_runtime_capture_text(str(raw.get("visible_text") or raw.get("text") or ""))
+            visible_text = str(raw.get("visible_text") or raw.get("text") or "")
+            raw_text = str(raw.get("raw_text") or "")
+            # Older native builds left the prefix/script tail in visible_text
+            # but retained the complete [>>]...[<<] span in raw_text.
+            capture_source = raw_text if any(
+                marker in raw_text for marker in ("[>>]", "[地]", "[text]")
+            ) else visible_text
+            text = _clean_runtime_capture_text(capture_source)
             if not text or text in seen or not _is_runtime_capture_text(text):
                 continue
             seen.add(text)

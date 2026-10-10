@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.realtime_translation_guard import realtime_translation_issue
 from translators.pricing import DEEPSEEK_V4_FLASH, cost_cny, pricing_dict
 from utils.logger import warning
 from utils.text_extract import is_acceptable_same_as_source, verify_translation
@@ -518,6 +519,37 @@ class TranslationCache:
             prompt_version=prompt_version,
         )
 
+    def invalidate_v2(
+        self,
+        original: str,
+        source_lang: str,
+        target_lang: str,
+        *,
+        provider: str = DEFAULT_PROVIDER,
+        model: str = DEFAULT_MODEL,
+        prompt_version: str = DEFAULT_PROMPT_VERSION,
+        text_type: str = "message",
+        remove_legacy: bool = True,
+    ) -> int:
+        """Remove a known-invalid exact and legacy cache result."""
+        normalized = self.normalize_text(original)
+        key = self._key_v2(
+            provider, model, prompt_version, source_lang, target_lang, text_type, normalized
+        )
+        deleted = 0
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM cache_v2 WHERE cache_key = ?", (key,))
+            deleted += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+            if remove_legacy:
+                cursor = self._conn.execute(
+                    "DELETE FROM cache WHERE hash = ?",
+                    (self._legacy_key(original, source_lang, target_lang),),
+                )
+                deleted += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+            if deleted:
+                self._conn.commit()
+        return deleted
+
     def set_many_v2(
         self,
         entries: list[tuple[str, str, str]],
@@ -540,6 +572,10 @@ class TranslationCache:
                 or not translated.strip()
                 or (translated == original and not is_acceptable_same_as_source(original, translated))
             ):
+                continue
+            if "realtime" in str(prompt_version or "").lower() and realtime_translation_issue(
+                original, translated, source_lang, target_lang
+            ) is not None:
                 continue
             normalized = self.normalize_text(original)
             key = self._key_v2(

@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from config import get_config
+from core.checkpoint_store import import_checkpoint_to_workspace, persist_workspace_checkpoint
 from utils.logger import info, warning
 from utils.text_extract import is_acceptable_same_as_source, validation_source_for_item, verify_translation
 
@@ -47,8 +48,22 @@ def checkpoint_resume_candidate(pipeline, game_path: Path, file_filter: list[str
     from core import pipeline as _pipeline_mod
     if file_filter:
         return None
-    checkpoint = _pipeline_mod._game_meta_path(game_path, "translation_checkpoint.json")
-    if not checkpoint.exists():
+    workspace_checkpoint = None
+    if getattr(pipeline, "workspace", None):
+        workspace_checkpoint = pipeline.workspace.root / "translation_checkpoint.json"
+    checkpoint = None
+    if workspace_checkpoint is not None:
+        checkpoint = import_checkpoint_to_workspace(
+            game_path,
+            workspace_checkpoint,
+            legacy_path=_pipeline_mod._game_meta_path(game_path, "translation_checkpoint.json"),
+        )
+        # A running pipeline always has a workspace.  Never return the legacy
+        # game-directory file here: later translation progress must be written
+        # to the workspace even when importing the old file failed.
+    else:
+        checkpoint = _pipeline_mod._game_meta_path(game_path, "translation_checkpoint.json")
+    if checkpoint is None or not checkpoint.exists():
         return None
     try:
         data = json.loads(checkpoint.read_text(encoding="utf-8-sig"))
@@ -261,6 +276,32 @@ def load_checkpoint_into(pipeline, items: list, checkpoint: Path):
     if invalid > 0:
         warning(f"检查点中 {invalid} 条旧译文未通过质量校验，已放回待翻译队列")
 
+def write_game_meta_mirror(pipeline, target: Path, payload: str) -> bool:
+    """把检查点/统计镜像写进游戏目录 _translation_meta。
+
+    镜像只是为了让下次选择同一游戏时直接复用检查点，工作区里的检查点才是权威
+    副本。游戏目录可能是只读介质、被其它程序占用或没有写入权限，这种情况只记
+    录事实并继续，绝不能让整条流水线在“导出检查点”阶段中断。
+    """
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(payload, encoding="utf-8")
+        return True
+    except OSError as exc:
+        warning(f"检查点镜像写入游戏目录失败，已跳过（不影响本次翻译）: {target} ({exc})")
+        diagnostics = getattr(pipeline, "diagnostics", None)
+        if diagnostics is not None:
+            try:
+                diagnostics.set("checkpoint_game_mirror", {
+                    "target": str(target),
+                    "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+            except Exception:
+                pass
+        return False
+
+
 def save_checkpoint_json(pipeline, items: list, game_path: Path,
                          source_lang: str, target_lang: str, json_path: Path):
     """将提取的文本保存为 JSON 检查点。"""
@@ -308,11 +349,32 @@ def save_checkpoint_json(pipeline, items: list, game_path: Path,
     }
 
     payload = _json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    json_path.write_text(payload, encoding="utf-8")
+    try:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(payload, encoding="utf-8")
+    except OSError as exc:
+        # Older callers may still pass the legacy game-directory path. Never
+        # let a protected game directory become the authoritative checkpoint.
+        fallback = (
+            pipeline.workspace.root / "translation_checkpoint.json"
+            if getattr(pipeline, "workspace", None)
+            else None
+        )
+        if fallback is None or fallback.resolve() == json_path.resolve():
+            raise
+        warning(f"检查点目标不可写，已改存工作区: {json_path} ({exc})")
+        fallback.parent.mkdir(parents=True, exist_ok=True)
+        fallback.write_text(payload, encoding="utf-8")
+        json_path = fallback
+    persistent = persist_workspace_checkpoint(game_path, json_path)
+    if persistent is not None:
+        diagnostics = getattr(pipeline, "diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.set("persistent_checkpoint", str(persistent))
     game_meta_checkpoint = _pipeline_mod._game_meta_path(game_path, "translation_checkpoint.json")
     if game_meta_checkpoint != json_path:
-        game_meta_checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        game_meta_checkpoint.write_text(payload, encoding="utf-8")
+        write_game_meta_mirror(pipeline, game_meta_checkpoint, payload)
+    return json_path
 
 def sync_checkpoint_json(pipeline, checkpoint: Path, items: list) -> None:
     """将 items 中的翻译增量同步到 JSON 检查点文件（全量改写但紧凑格式）。"""
@@ -362,15 +424,17 @@ def sync_checkpoint_json(pipeline, checkpoint: Path, items: list) -> None:
         try:
             payload = _json.dumps(data, ensure_ascii=False, separators=(",", ":"))
             checkpoint.write_text(payload, encoding="utf-8")
-            source = data.get("source")
-            if source:
-                game_checkpoint = _pipeline_mod._game_meta_path(Path(str(source)), "translation_checkpoint.json")
-                if game_checkpoint != checkpoint:
-                    game_checkpoint.parent.mkdir(parents=True, exist_ok=True)
-                    game_checkpoint.write_text(payload, encoding="utf-8")
         except Exception:
             warning("检查点 JSON 写入失败")
             return
+        source = data.get("source")
+        if source:
+            persistent_checkpoint = persist_workspace_checkpoint(Path(str(source)), checkpoint)
+            if persistent_checkpoint is not None and getattr(pipeline, "diagnostics", None):
+                pipeline.diagnostics.set("persistent_checkpoint", str(persistent_checkpoint))
+            game_checkpoint = _pipeline_mod._game_meta_path(Path(str(source)), "translation_checkpoint.json")
+            if game_checkpoint != checkpoint:
+                write_game_meta_mirror(pipeline, game_checkpoint, payload)
         info(f"检查点已同步: {data['translated_count']} 条")
 
 def _checkpoint_item_rel(path: str) -> str:

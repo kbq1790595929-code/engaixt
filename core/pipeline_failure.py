@@ -9,9 +9,9 @@ _MESSAGES = {
     "archive_extract_failed": "压缩包无法解压，翻译尚未开始。请确认压缩包完整，或先解压后选择游戏目录。",
     "engine_not_found": "没有识别出可用的游戏引擎，因此没有开始翻译。",
     "krkr_no_readable_script": "KRKR 的 XP3 封包可以读取，但没有提取出可解析的脚本，因此没有开始翻译。",
-    "krkr_static_tools_missing": "KRKR 静态组件不完整，无法继续解包或回填。可以改用实时翻译，或重新安装完整版本。",
-    "krkr_static_extract_failed": "KRKR 脚本提取失败，已尝试内置解析器和外部解包工具。可以改用实时翻译。",
-    "krkr_static_repack_failed": "KRKR 译文回填验证失败，原始游戏文件没有被修改。可以改用实时翻译。",
+    "krkr_static_tools_missing": "KRKR 静态组件不完整，无法继续解包或回填。请安装完整版本或补齐静态工具。",
+    "krkr_static_extract_failed": "KRKR 脚本提取失败，已尝试内置解析器和外部解包工具。请补齐静态工具后重试。",
+    "krkr_static_repack_failed": "KRKR 译文回填验证失败，原始游戏文件没有被修改。请检查静态补丁和脚本编码后重试。",
     "no_readable_text": "没有发现可翻译的有效文本，因此没有继续翻译或修改游戏。",
     "extract_failed": "文本提取阶段失败，因此没有开始翻译。",
     "repack_failed": "回填阶段失败，原始游戏文件没有被修改。",
@@ -26,6 +26,11 @@ _MESSAGES = {
 _MESSAGES.update({
     "checkpoint_missing": "翻译检查点不存在，无法执行回填，请重新完成提取或选择有效检查点。",
     "patch_no_translation": "检查点中没有可用译文，回填没有执行。",
+    "game_dir_read_only": (
+        "游戏目录不可写（只读介质或权限不足），译本、检查点和启动器都无法写回，"
+        "因此没有开始翻译。请先把游戏安装或复制到本机可写的目录，再选择该目录重新翻译。"
+    ),
+    "pipeline_exception": "翻译过程中出现未预期的错误，已停止；原始游戏文件没有被修改。",
 })
 
 
@@ -59,6 +64,11 @@ class StageFailure:
         }
         result.update(self.extra)
         return result
+
+
+def failure_message(code: str) -> str:
+    """取某个失败码的用户可读文案（未登记时回退到通用说明）。"""
+    return _MESSAGES.get(code, "当前阶段执行失败，原始游戏文件没有被修改。")
 
 
 def make_stage_failure(

@@ -15,8 +15,6 @@ from typing import Callable
 from config import get_config
 from core.exe_selector import find_main_exe
 from core.kirikiri_launcher_policy import (
-    has_active_kirikiri_root_patch,
-    kirikiri_needs_patch_bridge,
     KIRIKIRI_REALTIME_LAUNCHER_NAME,
     KIRIKIRI_STATIC_LAUNCHER_NAME,
     preserve_legacy_kirikiri_realtime_launcher,
@@ -92,11 +90,12 @@ def launch_translated_launcher(launcher: Path, cwd: Path | None = None, hidden: 
         suffix = launcher.suffix.lower()
         if suffix in {".bat", ".cmd"}:
             comspec = os.environ.get("ComSpec") or "cmd.exe"
-            # ``cmd`` treats parentheses in an unquoted batch path as control
-            # syntax. Keep the path quoted because game folders commonly use
-            # release names such as ``(18禁ゲーム) ...``.
-            quoted_launcher = '"' + str(launcher).replace('"', '\\"') + '"'
-            cmd = [comspec, "/d", "/c", "call", quoted_launcher]
+            # Pass the raw path as one argv item. ``subprocess`` quotes it for
+            # Windows; pre-escaping it here produces literal ``\"`` characters
+            # in cmd.exe and makes hidden launches fail with code 1.
+            # ``call`` is required so cmd handles batch files consistently,
+            # including paths containing parentheses.
+            cmd = [comspec, "/d", "/c", "call", str(launcher)]
         elif suffix == ".ps1":
             cmd = [
                 "powershell.exe",
@@ -339,7 +338,7 @@ def create_kirikiri_native_launcher(game_path: Path, engine: object | None = Non
 
 
 def create_kirikiri_static_launcher(game_path: Path, engine: object | None = None,
-                                     checkpoint: Path | None = None) -> Path | None:
+                                    checkpoint: Path | None = None) -> Path | None:
     """Create the launcher used by the normal KRKR static-patch route.
 
     The translated game is loaded through KRKR's normal resource lookup. The
@@ -468,25 +467,15 @@ def create_godot_display_hook_launcher(game_path: Path, engine: object | None = 
     return launcher
 
 
-def _kirikiri_needs_patch_bridge(game_dir: Path) -> bool:
-    return kirikiri_needs_patch_bridge(game_dir)
-
-
 def _kirikiri_native_hook_profile(game_dir: Path) -> str:
-    """Use the static stream bridge only for a complete protected patch set."""
-    meta_dir = game_dir / "_translation_meta"
-    manifest = meta_dir / "kirikiri_patch_manifest.txt"
-    try:
-        has_manifest = manifest.is_file() and bool(manifest.read_text(encoding="utf-8-sig").strip())
-    except OSError:
-        has_manifest = False
-    has_patch = (
-        (meta_dir / "kirikiri_patch").is_dir()
-        or (meta_dir / "kirikiri_patch.xp3").is_file()
-        or (game_dir / "patch.xp3").is_file()
-    )
-    if has_manifest and has_patch and _kirikiri_needs_patch_bridge(game_dir):
-        return "patchstream"
+    """Return the stable KRKR route: native hooks replace the game's text.
+
+    ``patchstream`` is kept in the native runtime for explicit experiments,
+    but it must never be selected from the presence of old static patch
+    artifacts. Those artifacts are common after an earlier run and selecting
+    the stream bridge here silently disables the internal text hooks, which
+    leaves the game showing its original dialogue.
+    """
     return "display"
 
 
@@ -560,6 +549,13 @@ def launch_kirikiri_native_runtime(
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         startupinfo = _hidden_startupinfo()
 
+    hook_profile = _kirikiri_native_hook_profile(game_dir)
+    # Realtime KRKR translation always has an independent subtitle window.
+    # In-game replacement is an explicit action from that window and must not
+    # be enabled during startup, because it can make the game's own renderer
+    # lose or corrupt text before the user has chosen that mode.
+    use_overlay = True
+
     overlay_cmd, overlay_cwd, overlay_env = _overlay_window_command(
         game_dir.name,
         exe_path.name,
@@ -618,21 +614,18 @@ def launch_kirikiri_native_runtime(
                 log_start(f"overlay_terminate_failed: {exc}")
         diagnostics.poll()
 
-    overlay_proc = start_overlay_window("initial")
+    overlay_proc = start_overlay_window("initial") if use_overlay else None
 
     native_env = os.environ.copy()
-    native_env["KIRIKIRI_NATIVE_HOOK_PROFILE"] = "display"
+    native_env["KIRIKIRI_NATIVE_HOOK_PROFILE"] = hook_profile
 
-    # 从配置读取嵌入状态
-    from config import get_config
-    cfg = get_config()
-    embed_enabled = bool(getattr(cfg, "kirikiri_overlay_embedded", True))
+    embed_enabled = False
     native_env["KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE"] = "1" if embed_enabled else "0"
-    native_env["KIRIKIRI_EMBED_WAIT_MS"] = "6000"
+    native_env["KIRIKIRI_EMBED_WAIT_MS"] = "0"
 
     # DLL 内部已实现短路优先级策略，不再需要外部白名单控制。
     # 按优先级尝试：zx → embed → z2/kr2，装成功一个就跳过剩余的，避免多 hook 冲突。
-    capture_hooks = "zx,embed,z2,kr2"
+    capture_hooks = "kag,zx,embed,z2,kr2"
 
     # KIRIKIRI_CAPTURE_HOOKS is the name this build uses. The older
     # KIRIKIRI_LUNA_CAPTURE_HOOKS is written too so a native binary deployed
@@ -640,6 +633,9 @@ def launch_kirikiri_native_runtime(
     # falling back to the default profile.
     native_env["KIRIKIRI_CAPTURE_HOOKS"] = capture_hooks
     native_env["KIRIKIRI_LUNA_CAPTURE_HOOKS"] = capture_hooks
+    experimental_hooks = hook_profile == "display"
+    native_env["KIRIKIRI_EXPERIMENTAL_TEXT_HOOKS"] = "1" if experimental_hooks else "0"
+    native_env["KIRIKIRI_EXPERIMENTAL_LUNA_HOOKS"] = "1" if experimental_hooks else "0"
     try:
         proc = subprocess.Popen(
             [str(native_launcher), str(exe_path), "--wait", "--quiet"],
@@ -649,12 +645,14 @@ def launch_kirikiri_native_runtime(
             startupinfo=startupinfo,
         )
         info(f"KiriKiri native realtime launched without shell script: {exe_path}")
-        monitor_thread = threading.Thread(
-            target=monitor_overlay_window,
-            args=(proc, overlay_proc),
-            daemon=True,
-        )
-        monitor_thread.start()
+        monitor_thread = None
+        if use_overlay:
+            monitor_thread = threading.Thread(
+                target=monitor_overlay_window,
+                args=(proc, overlay_proc),
+                daemon=True,
+            )
+            monitor_thread.start()
         if wait:
             proc.wait()
             if monitor_thread is not None:
@@ -735,19 +733,20 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
     native_rel = _relative_to_dir(native_launcher, game_dir) or str(native_launcher)
     overlay_exe, overlay_prefix_args, overlay_cwd, overlay_needs_pythonpath = _overlay_window_launch_spec()
     no_window_timeout = max(10, min(300, int(getattr(get_config(), "kirikiri_no_window_timeout_seconds", 45) or 45)))
-    capture_hooks_for_bat = "zx,embed,z2,kr2"
+    capture_hooks_for_bat = "kag,zx,embed,z2,kr2"
     hook_profile = _kirikiri_native_hook_profile(game_dir)
-    # Static root patches already replace the game scripts. Keep the native
-    # launcher for its font compatibility behavior, but do not add the
-    # realtime second window on top of an already translated game.
-    use_overlay = hook_profile == "display" and not has_active_kirikiri_root_patch(game_dir)
+    # The portable realtime launcher follows the same policy as the GUI:
+    # start the independent subtitle window and leave in-game replacement off
+    # until the user explicitly enables it there.
+    use_overlay = True
+    embed_enabled = False
     patch_loader_rel = "KrkrPatchLoader.exe"
-    use_patch_bridge_loader = (
-        hook_profile == "patchstream"
-        and (game_dir / "KrkrPatchLoader.exe").is_file()
-        and (game_dir / "KrkrPatch.dll").is_file()
-        and (game_dir / "KrkrPatch.json").is_file()
-    )
+    # The project native hook is the authoritative protected-game bridge.
+    # KrkrPatch's upstream loader skips full file:// XP3 member requests,
+    # which are the common path for protected dialogue scripts. Keeping the
+    # external loader as the default therefore makes menu-only success look
+    # like a completed translation while the active dialogue stays Japanese.
+    use_patch_bridge_loader = False
     ps_lines = [
         "$ErrorActionPreference = 'Stop'",
         "$GameDir = [Environment]::GetEnvironmentVariable('KIRIKIRI_GAME_DIR', 'Process')",
@@ -823,10 +822,12 @@ def _write_native_kirikiri_launcher(game_dir: Path, exe_rel: str, native_launche
         "}",
         "if (-not (Test-Path -LiteralPath $Exe)) { Fail ('Game executable not found: ' + $Exe) }",
         f"$env:KIRIKIRI_NATIVE_HOOK_PROFILE = '{hook_profile}'",
-        f"$env:KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE = '{'1' if use_overlay else '0'}'",
-        f"$env:KIRIKIRI_EMBED_WAIT_MS = '{'6000' if use_overlay else '0'}'",
+        f"$env:KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE = '{'1' if embed_enabled else '0'}'",
+        "$env:KIRIKIRI_EMBED_WAIT_MS = '0'",
         f"$env:KIRIKIRI_CAPTURE_HOOKS = '{capture_hooks_for_bat}'",
         f"$env:KIRIKIRI_LUNA_CAPTURE_HOOKS = '{capture_hooks_for_bat}'",
+        f"$env:KIRIKIRI_EXPERIMENTAL_TEXT_HOOKS = '{'1' if hook_profile == 'display' else '0'}'",
+        f"$env:KIRIKIRI_EXPERIMENTAL_LUNA_HOOKS = '{'1' if hook_profile == 'display' else '0'}'",
         "$overlayProc = $null",
         "$overlayRestartCount = 0",
         "$overlayExitLogged = $false",

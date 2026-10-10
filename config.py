@@ -42,6 +42,7 @@ DIAGNOSTIC_SNAPSHOT_FIELDS = frozenset({
     "hy_mt2_model",
     "hy_mt2_context_size",
     "hy_mt2_batch_size",
+    "hy_mt2_parallel",
     "hy_mt2_idle_timeout_seconds",
     "max_batch_size",
     "max_concurrency",
@@ -75,6 +76,7 @@ DIAGNOSTIC_SNAPSHOT_FIELDS = frozenset({
     "kirikiri_overlay_live_translate",
     "kirikiri_overlay_follow_window",
     "kirikiri_overlay_locked",
+    "kirikiri_overlay_embedded",
     "kirikiri_overlay_remember_position",
 })
 
@@ -99,6 +101,7 @@ class Config:
     hy_mt2_model: str = "Hy-MT2-1.8B-Q4_K_M"
     hy_mt2_context_size: int = 4096
     hy_mt2_batch_size: int = 8
+    hy_mt2_parallel: int = 3
     hy_mt2_idle_timeout_seconds: int = 180
     active_translator: str = "deepseek"
     ui_language: str = "zh-CN"
@@ -153,6 +156,7 @@ class Config:
     kirikiri_overlay_live_translate: bool = True
     kirikiri_overlay_follow_window: bool = True
     kirikiri_overlay_locked: bool = False
+    kirikiri_overlay_embedded: bool = False
     kirikiri_overlay_remember_position: bool = True
     kirikiri_overlay_saved_x: int = -1
     kirikiri_overlay_saved_y: int = -1

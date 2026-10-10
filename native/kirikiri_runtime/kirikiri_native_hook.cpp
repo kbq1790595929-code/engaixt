@@ -225,6 +225,7 @@ volatile LONG gInternalKrkrZ2Hits = 0;
 volatile LONG gInternalEmbedKrkrZHits = 0;
 volatile LONG gEmbedKrkrZConverterBypassCount = 0;
 volatile LONG gEmbedKrkrZCursorReplaceCount = 0;
+volatile LONG gEmbedKrkrZCursorFragmentSkipCount = 0;
 volatile LONG gEmbedKrkrZAfterNewCount = 0;
 volatile LONG gEmbedKrkrZAfterNewLogCount = 0;
 volatile LONG gTextRenderHits = 0;
@@ -239,6 +240,7 @@ volatile LONG gInternalEmbedKrkr2SkipSamples = 0;
 volatile LONG gInternalEmbedKrkr2SlotApplied = 0;
 volatile LONG gInternalEmbedKrkr2SlotWriteFailures = 0;
 volatile LONG gInternalKrkr2WcsHits = 0;
+volatile LONG gInternalWideSampleCount = 0;
 volatile LONG gRuntimeOverlayMissSamples = 0;
 volatile LONG gRuntimeUtf8DeferredCount = 0;
 volatile LONG gRuntimeTextCaptureCount = 0;
@@ -277,11 +279,17 @@ void *gEmbedKrkrZConverterTarget = nullptr;
 void *gEmbedKrkrZCursorTarget = nullptr;
 std::mutex gEmbedKrkrZCursorMutex;
 std::unordered_map<const char **, std::pair<uintptr_t, uintptr_t>> gEmbedKrkrZCursorRanges;
+struct Utf8CursorCaptureState {
+    uintptr_t sourceAddress = 0;
+    std::string raw;
+};
+std::unordered_map<const char **, Utf8CursorCaptureState> gEmbedKrkrZCursorCaptureStates;
 std::mutex gEmbedKrkr2SlotMutex;
 std::unordered_map<const wchar_t **, const wchar_t *> gEmbedKrkr2SlotReplacements;
 constexpr LONG INITIAL_READ_BYPASS = 32;
 constexpr LONG MAX_DUMP_FILES = 4096;
 constexpr tjs_uint64 MAX_DUMP_STREAM_BYTES = 32ull * 1024ull * 1024ull;
+constexpr unsigned int kEmbedControlUnset = 0xFFFFFFFFu;
 constexpr const wchar_t *kChineseFontFaceW = L"Microsoft YaHei UI";
 constexpr const char *kChineseFontFaceA = "Microsoft YaHei UI";
 constexpr BYTE kChineseCharset = GB2312_CHARSET;
@@ -303,6 +311,7 @@ bool DecodeWidePuaTunnel(const wchar_t *text, int count, std::wstring *out);
 bool TryReadTjsString(const tTJSString &source, std::wstring *out);
 void WriteToOverlay(const std::wstring &original, const std::wstring &translated, const std::wstring &speaker);
 std::wstring ShortLogText(const std::wstring &value, size_t limit);
+std::wstring EscapeLogText(const std::wstring &value, size_t limit);
 bool IsEmbedTextReplacementEnabled();
 
 bool DumpCaptureEnabled() {
@@ -370,7 +379,46 @@ bool ContainsEmbedKrkrZChatFlag(const std::wstring &s) {
     for (const wchar_t *flag : flags) {
         if (s.find(flag) != std::wstring::npos) return true;
     }
+    // Punctuation is optional for visible text. Japanese short reactions and
+    // sound effects often contain only kana, for example "えっ" or "ドン".
+    for (wchar_t ch : s) {
+        if ((ch >= 0x3040 && ch <= 0x30FF) ||
+            (ch >= 0x31F0 && ch <= 0x31FF) ||
+            (ch >= 0xFF66 && ch <= 0xFF9F)) {
+            return true;
+        }
+        if ((ch >= 0x3400 && ch <= 0x9FFF) ||
+            (ch >= 0xF900 && ch <= 0xFAFF)) {
+            return true;
+        }
+    }
     return false;
+}
+
+bool LooksLikeEmbedKrkrZScript(const std::wstring &text) {
+    // The UTF-8 conversion routine also sees script source while KiriKiri
+    // loads a TJS file. Script source can contain Japanese comments and
+    // punctuation, so the normal dialogue filter alone is insufficient.
+    if (text.find(L"[endscript]") != std::wstring::npos ||
+        text.find(L"[endmacro]") != std::wstring::npos ||
+        text.find(L"@endscript") != std::wstring::npos ||
+        text.find(L"@endmacro") != std::wstring::npos ||
+        text.find(L"@macro ") != std::wstring::npos) {
+        return true;
+    }
+    size_t lineBreaks = std::count(text.begin(), text.end(), L'\n');
+    if (lineBreaks < 2) return false;
+    static const wchar_t *markers[] = {
+        L"var ", L"function ", L"kag.", L"global.", L"initTime(",
+        L" !== ", L" !==", L" != ", L"if (", L"return ", L"new ",
+        L"@eval ", L"@if ",
+    };
+    size_t codeMarkers = 0;
+    for (const wchar_t *marker : markers) {
+        if (text.find(marker) != std::wstring::npos) ++codeMarkers;
+    }
+    size_t semicolons = static_cast<size_t>(std::count(text.begin(), text.end(), L';'));
+    return codeMarkers >= 2 || (lineBreaks >= 8 && semicolons >= 2);
 }
 
 void Log(const std::wstring &message) {
@@ -1087,6 +1135,7 @@ std::wstring RuntimeVisibleText(const std::wstring &src) {
 }
 
 std::wstring KagParserVisibleText(const std::wstring &src);
+std::wstring ExtractRuntimeChatVisibleText(const std::wstring &src);
 
 void PublishRuntimeOverlayText(
     const std::wstring &sourceText,
@@ -1135,6 +1184,30 @@ void PublishRuntimeOverlayText(
 std::wstring ShortLogText(const std::wstring &value, size_t limit = 120) {
     if (value.size() <= limit) return value;
     return value.substr(0, limit) + L"...";
+}
+
+std::wstring EscapeLogText(const std::wstring &value, size_t limit = 160) {
+    std::wstring shortened = ShortLogText(value, limit);
+    std::wstring out;
+    out.reserve(shortened.size() + 16);
+    for (wchar_t ch : shortened) {
+        switch (ch) {
+        case L'\\': out += L"\\\\"; break;
+        case L'\r': out += L"\\r"; break;
+        case L'\n': out += L"\\n"; break;
+        case L'\t': out += L"\\t"; break;
+        default:
+            if (ch < 0x20) {
+                wchar_t buf[8] = {};
+                swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"\\x%04x", static_cast<unsigned int>(ch));
+                out += buf;
+            } else {
+                out.push_back(ch);
+            }
+            break;
+        }
+    }
+    return out;
 }
 
 std::wstring LowerWide(std::wstring value) {
@@ -1575,8 +1648,11 @@ extern "C" __declspec(dllexport) const char *__stdcall KiriKiriCaptureInternalUt
         if (hitCounter) InterlockedIncrement(hitCounter);
         return text;
     }
-    std::string visibleUtf8 = kirikiri_embed::NormalizeEmbedKrkrZText(raw);
-    std::wstring visible = RuntimeVisibleText(Utf8ToWide(visibleUtf8));
+    std::wstring extracted = ExtractRuntimeChatVisibleText(wide);
+    std::wstring normalized = extracted.empty()
+        ? Utf8ToWide(kirikiri_embed::NormalizeEmbedKrkrZText(raw))
+        : extracted;
+    std::wstring visible = RuntimeVisibleText(normalized);
     if (!IsInternalCandidateText(visible)) return text;
     if (!kirikiri_text::HasUtf8DialogueEvidence(wide, visible)) {
         bool confirmed = false;
@@ -1643,6 +1719,33 @@ extern "C" __declspec(dllexport) void __stdcall KiriKiriReplaceEmbeddedUtf8Curso
         if (active != gEmbedKrkrZCursorRanges.end()) {
             if (sourceAddress >= active->second.first && sourceAddress <= active->second.second) return;
             gEmbedKrkrZCursorRanges.erase(active);
+        }
+    }
+
+    std::string raw;
+    if (TryReadNarrowCString(source, 4096, &raw)) {
+        uintptr_t sourceAddress = reinterpret_cast<uintptr_t>(source);
+        bool suffixFragment = false;
+        {
+            std::lock_guard<std::mutex> lock(gEmbedKrkrZCursorMutex);
+            auto state = gEmbedKrkrZCursorCaptureStates.find(cursor);
+            if (state != gEmbedKrkrZCursorCaptureStates.end()) {
+                const std::string &previous = state->second.raw;
+                uintptr_t previousEnd = state->second.sourceAddress + previous.size();
+                suffixFragment =
+                    !previous.empty() && raw.size() < previous.size() &&
+                    sourceAddress > state->second.sourceAddress &&
+                    sourceAddress < previousEnd &&
+                    previous.compare(previous.size() - raw.size(), raw.size(), raw) == 0;
+            }
+            if (gEmbedKrkrZCursorCaptureStates.size() >= 4096) {
+                gEmbedKrkrZCursorCaptureStates.clear();
+            }
+            gEmbedKrkrZCursorCaptureStates[cursor] = {sourceAddress, raw};
+        }
+        if (suffixFragment) {
+            InterlockedIncrement(&gEmbedKrkrZCursorFragmentSkipCount);
+            return;
         }
     }
 
@@ -1777,8 +1880,55 @@ std::wstring KagParserVisibleText(const std::wstring &src) {
     }
     out = StripKagTags(out, true);
     out = CollapseWideSpaces(out, true);
-    if (out.size() <= 1) return {};
+    if (TrimWide(out).empty()) return {};
     return out;
+}
+
+std::wstring ExtractRuntimeChatVisibleText(const std::wstring &src) {
+    std::wstring text = TrimWide(src);
+    if (text.empty()) return {};
+
+    // The cursor hook can receive a whole KAG command plus its visible tail.
+    // Stop at script control tails before looking for the dialogue span.
+    size_t stop = std::wstring::npos;
+    for (const wchar_t *marker : {L"*End", L"@SC_EndProcess"}) {
+        size_t pos = text.find(marker);
+        if (pos != std::wstring::npos) stop = stop == std::wstring::npos ? pos : std::min(stop, pos);
+    }
+    if (stop != std::wstring::npos) text = TrimWide(text.substr(0, stop));
+
+    auto extractBetween = [&](const wchar_t *open, const wchar_t *close) -> std::wstring {
+        size_t begin = text.find(open);
+        if (begin == std::wstring::npos) return {};
+        begin += wcslen(open);
+        size_t end = text.find(close, begin);
+        if (end == std::wstring::npos) return {};
+        return text.substr(begin, end - begin);
+    };
+
+    std::wstring visible = extractBetween(L"[>>]", L"[<<]");
+    if (visible.empty()) visible = extractBetween(L"[地]", L"[<<]");
+    if (!visible.empty()) return TrimWide(CollapseWideSpaces(StripPercentControls(StripKagTags(visible, true)), true));
+
+    if (text.rfind(L"[text]", 0) == 0) {
+        text = text.substr(6);
+    } else if (text.rfind(L"[地]", 0) == 0) {
+        text = text.substr(3);
+    } else if (!text.empty() && text[0] == L'[') {
+        size_t close = text.find(L']', 1);
+        if (close != std::wstring::npos) {
+            std::wstring header = LowerWide(text.substr(1, close - 1));
+            if (header.find(L'=') != std::wstring::npos ||
+                header.rfind(L"voice", 0) == 0 || header.rfind(L"name", 0) == 0 ||
+                header.rfind(L"chara", 0) == 0 || header.rfind(L"speaker", 0) == 0) {
+                text = text.substr(close + 1);
+            }
+        }
+    }
+
+    text = StripKagTags(text, true);
+    text = StripPercentControls(text);
+    return TrimWide(CollapseWideSpaces(text, true));
 }
 
 void InitOverlaySharedMemory() {
@@ -1831,15 +1981,21 @@ void InitOverlaySharedMemory() {
         4096,
         L"kirikiri_translation_overlay_control"
     );
+    DWORD controlCreateError = GetLastError();
     if (gEmbedControlSharedMemory) {
         gEmbedControlSharedMemoryView = MapViewOfFile(
             gEmbedControlSharedMemory,
-            FILE_MAP_READ,
+            FILE_MAP_READ | FILE_MAP_WRITE,
             0,
             0,
             4096
         );
         if (gEmbedControlSharedMemoryView) {
+            if (controlCreateError != ERROR_ALREADY_EXISTS) {
+                unsigned int unset = kEmbedControlUnset;
+                memcpy(gEmbedControlSharedMemoryView, &unset, sizeof(unset));
+                MemoryBarrier();
+            }
             Log(L"[kirikiri native] embed control shared memory initialized");
         } else {
             Log(L"[kirikiri native] embed control MapViewOfFile failed, error=" + std::to_wstring(GetLastError()));
@@ -1854,8 +2010,9 @@ bool IsEmbedTextReplacementEnabled() {
     if (gEmbedControlSharedMemoryView) {
         unsigned int controlFlag = 0;
         memcpy(&controlFlag, gEmbedControlSharedMemoryView, sizeof(controlFlag));
-        // 如果共享内存可用，直接使用共享内存的值
-        return controlFlag != 0;
+        // The unset marker means there is no overlay/controller process. In
+        // that case the native launch profile remains the source of truth.
+        if (controlFlag != kEmbedControlUnset) return controlFlag != 0;
     }
 
     // 共享内存不可用时，回退到初始环境变量设置
@@ -1966,7 +2123,7 @@ const wchar_t *ResolveKagParserArgument(const wchar_t *text, int maxChars) {
     }
     std::wstring displayOut = *translated;
     if (displayOut.empty() || displayOut == visible) return text;
-    if (!gVmTextReplacement) {
+    if (!gVmTextReplacement && !IsEmbedTextReplacementEnabled()) {
         InterlockedIncrement(&gInternalKagHits);
         LONG sample = InterlockedIncrement(&gInternalKagReplaceSamples);
         if (sample <= 80) {
@@ -5265,8 +5422,16 @@ void InstallInternalTextHooks() {
         ok = InstallTextRenderInternalHook() || ok;
     }
     if (CaptureHookSelected(captureMode, L"kag")) {
-        ok = InstallKagParserEntryHook(L"KAGParser.dll", &gKagParserEntryHookTarget) || ok;
-        ok = InstallKagParserEntryHook(L"ExtKAGParser.dll", &gExtKagParserEntryHookTarget) || ok;
+        // The operator+ entry hook is useful for diagnosis, but it runs on a
+        // broad tTJSString ABI surface. Keep it opt-in until its calling
+        // convention is verified across the loaded KAGParser variants. The
+        // text-buffer hook below is the display path and is safe by default.
+        if (EnvFlagEnabled(L"KIRIKIRI_ENABLE_KAG_ENTRY_HOOKS")) {
+            ok = InstallKagParserEntryHook(L"KAGParser.dll", &gKagParserEntryHookTarget) || ok;
+            ok = InstallKagParserEntryHook(L"ExtKAGParser.dll", &gExtKagParserEntryHookTarget) || ok;
+        } else {
+            Log(L"[kirikiri native] KAG tTJSString entry hooks disabled; text-buffer hook remains active");
+        }
         ok = InstallKagParserInternalHook(L"KAGParser.dll", false) || ok;
         ok = InstallKagParserInternalHook(L"ExtKAGParser.dll", true) || ok;
         ok = InstallKagParserInternalHook(L"KAGParserEx.dll", true) || ok;
@@ -5940,9 +6105,10 @@ DWORD WINAPI DumpFlushThread(void *) {
             L" krkrzx_hits=" + std::to_wstring(gInternalKirikiriZXHits) +
             L" krkrz2_hits=" + std::to_wstring(gInternalKrkrZ2Hits) +
             L" embed_krkrz_hits=" + std::to_wstring(gInternalEmbedKrkrZHits) +
-            L" embed_converter_bypass=" + std::to_wstring(gEmbedKrkrZConverterBypassCount) +
-            L" embed_cursor_replaced=" + std::to_wstring(gEmbedKrkrZCursorReplaceCount) +
-            L" embed_replaced=" + std::to_wstring(embedStats.replacements) +
+             L" embed_converter_bypass=" + std::to_wstring(gEmbedKrkrZConverterBypassCount) +
+             L" embed_cursor_replaced=" + std::to_wstring(gEmbedKrkrZCursorReplaceCount) +
+             L" embed_cursor_fragment_skips=" + std::to_wstring(gEmbedKrkrZCursorFragmentSkipCount) +
+             L" embed_replaced=" + std::to_wstring(embedStats.replacements) +
             L" embed_after_new=" + std::to_wstring(gEmbedKrkrZAfterNewCount) +
             L" embed_missed=" + std::to_wstring(embedStats.misses) +
             L" embed_wide_replaced=" + std::to_wstring(embedStats.wideReplacements) +

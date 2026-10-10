@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from config import get_config
+from core.game_dir_access import describe_game_dir_access
 from core.tool_manager import get_tools_dir, tool_status
 
 
@@ -17,6 +18,7 @@ def run_preflight(game_path: Path, engine: object | None = None,
     suggestions: list[str] = []
 
     _check_path(game_path, checks, suggestions)
+    _check_game_dir_access(game_path, checks, suggestions)
     _check_translator(cfg.active_translator, checks, suggestions)
 
     if engine_name in ("unity", "xunity_realtime") or injector == "xunity":
@@ -71,7 +73,7 @@ def run_preflight(game_path: Path, engine: object | None = None,
             "detail": ", ".join(available_static_tools) if available_static_tools else "未找到可选 KRKR 静态组件",
         })
         if not available_static_tools:
-            suggestions.append("当前安装包缺少 KRKR 静态组件；可以改用实时翻译，或重新安装完整包。")
+            suggestions.append("当前安装包缺少 KRKR 静态组件；请重新安装完整包或补齐 GARbro/msg_tool 等工具。")
 
     if engine_name == "wolf":
         try:
@@ -114,6 +116,22 @@ def _check_path(path: Path, checks: list[dict], suggestions: list[str]):
             "detail": "路径包含非 ASCII 字符，少数外部工具可能失败",
         })
         suggestions.append("如果外部工具异常，尝试把游戏移动到纯英文路径后重试。")
+
+
+def _check_game_dir_access(game_path: Path, checks: list[dict], suggestions: list[str]):
+    """游戏目录不可写（只读介质/无权限）会让回填与检查点写入全部失败。"""
+    access = describe_game_dir_access(game_path)
+    writable = bool(access.get("writable"))
+    checks.append({
+        "name": "game_dir_writable",
+        "status": "ok" if writable else "missing",
+        "required": True,
+        "detail": str(access.get("detail") or access.get("dir") or ""),
+    })
+    if not writable:
+        action = str(access.get("action") or "")
+        if action:
+            suggestions.append(action)
 
 
 def _check_translator(name: str, checks: list[dict], suggestions: list[str]):

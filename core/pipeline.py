@@ -13,9 +13,15 @@ from config import get_config
 from core.detector import detect_engine_candidates
 from core.diagnostics import Diagnostics
 from core.engine_capabilities import can_extract, can_repack, engine_support_summary
+from core.game_dir_access import describe_game_dir_access
 from core.manifest import GameManifest
 from core.path_resolver import resolve_game_path
-from core.pipeline_failure import StageFailure, make_stage_failure, publish_stage_failure
+from core.pipeline_failure import (
+    StageFailure,
+    failure_message,
+    make_stage_failure,
+    publish_stage_failure,
+)
 from core.pipeline_stages import stage
 from core.pipeline_lock import game_pipeline_lock
 from core import (
@@ -215,6 +221,40 @@ class Pipeline:
             **extra,
         ))
 
+    def _ensure_game_dir_writable(self, game_path: Path) -> bool:
+        """游戏目录必须可写：回填、检查点镜像和运行时启动器都落在游戏目录里。
+
+        只读介质（光盘/虚拟光驱/挂载镜像）或权限不足时，任何引擎路线都无法完成
+        翻译；在动引擎和花 API 费用之前提前停止，并给出可执行的结论。
+        """
+        access = describe_game_dir_access(game_path)
+        if self.diagnostics:
+            self.diagnostics.set("game_dir_access", access)
+        if access.get("writable"):
+            return True
+        return self._fail_stage_code(
+            "detect",
+            "game_dir_read_only",
+            detail=str(access.get("detail") or access.get("dir") or ""),
+            rollback=False,
+            next_actions=(str(access.get("action") or ""),),
+        )
+
+    def _publish_unhandled_failure(self, exc: BaseException) -> None:
+        """未捕获异常也要变成结构化失败，GUI 运行日志才能显示具体原因。"""
+        message = str(exc).strip() or type(exc).__name__
+        failure = make_stage_failure(
+            "pipeline",
+            "pipeline_exception",
+            user_message=f"{failure_message('pipeline_exception')}（{message}）",
+            detail=f"{type(exc).__name__}: {message}",
+            next_actions=("查看运行日志与 diagnostics.json 里的完整堆栈，确认失败阶段后重试。",),
+        )
+        try:
+            publish_stage_failure(self.diagnostics, self.meta, failure)
+        except Exception:
+            pass
+
     def _fail_kirikiri_static_stage(
         self,
         game_path: Path,
@@ -225,53 +265,32 @@ class Pipeline:
         code: str,
         detail: str = "",
     ) -> bool:
-        """Report a KRKR static failure and prepare, but never start, realtime."""
+        """Report a KRKR static failure without creating a runtime fallback."""
         game_dir = game_path if game_path.is_dir() else game_path.parent
         meta_dir = game_dir / "_translation_meta"
         capture_path = meta_dir / "kirikiri_runtime_capture.jsonl"
-        launcher: Path | None = None
         try:
             meta_dir.mkdir(parents=True, exist_ok=True)
             if not capture_path.exists():
                 capture_path.write_text("", encoding="utf-8")
-            launcher = create_kirikiri_native_launcher(
-                game_path,
-                engine=engine,
-                checkpoint=checkpoint,
-            )
         except Exception as exc:
-            detail = f"{detail}; realtime launcher preparation error: {exc}".strip("; ")
-
-        if launcher:
-            if self.diagnostics:
-                self.diagnostics.set("kirikiri_realtime_fallback", {
-                    "available": True,
-                    "launcher": str(launcher),
-                    "capture": str(capture_path),
-                    "started": False,
-                })
-                if self.manifest:
-                    self.manifest.record_created(launcher, kind="runtime", runtime_required=True)
-            info("KRKR 静态方案失败，已准备实时 Hook 启动器；等待用户确认")
-            return self._fail_stage_code(
-                stage,
-                code,
-                detail=detail,
-                fallback="realtime",
-                actions=("改用实时翻译",),
-                tool_attempts=tuple(getattr(engine, "_static_external_tool_attempts", []) or []),
-                rollback=True,
-                next_actions=("点击“改用实时翻译”启动 KRKR 原生 Hook。",),
-                fallback_launcher=str(launcher),
-                capture=str(capture_path),
-            )
-
+            detail = f"{detail}; 静态诊断文件准备失败: {exc}".strip("; ")
+        if self.diagnostics:
+            self.diagnostics.set("kirikiri_realtime_fallback", {
+                "available": False,
+                "reason": "disabled_by_static_policy",
+                "capture": str(capture_path),
+                "started": False,
+            })
+        info("KRKR 静态方案失败；按静态路线策略停止，不创建或启动 runtime hook")
         return self._fail_stage_code(
-            "runtime",
-            "runtime_prepare_failed",
-            detail=detail or "KRKR 原生 Hook 启动器未生成",
+            stage,
+            code,
+            detail=detail,
+            tool_attempts=tuple(getattr(engine, "_static_external_tool_attempts", []) or []),
             rollback=True,
-            next_actions=("重新安装完整发布包，或使用仅提取检查工具组件。",),
+            next_actions=("安装或配置可用的 KRKR 静态提取工具后重试。",),
+            capture=str(capture_path),
         )
 
     def _rollback_game_changes(self, game_path: Path) -> bool:
@@ -656,6 +675,7 @@ class Pipeline:
         except Exception as e:
             import traceback
             error(f"管线异常退出: {e}\n{traceback.format_exc()}")
+            self._publish_unhandled_failure(e)
             try:
                 self.progress("错误", 0)
             except Exception:
@@ -676,6 +696,7 @@ class Pipeline:
         except Exception as e:
             import traceback
             error(f"管线异常退出: {e}\n{traceback.format_exc()}")
+            self._publish_unhandled_failure(e)
             try:
                 self.progress("错误", 0)
             except Exception:
@@ -693,6 +714,7 @@ class Pipeline:
         except Exception as e:
             import traceback
             error(f"polish pipeline failed: {e}\n{traceback.format_exc()}")
+            self._publish_unhandled_failure(e)
             try:
                 self.progress("error", 0)
             except Exception:
@@ -722,6 +744,8 @@ class Pipeline:
         try:
             # ---- 仅回填模式：从 JSON 直接跳到 repack ----
             if patch_only:
+                if not self._ensure_game_dir_writable(path):
+                    return False
                 resume = _Path(resume_json) if resume_json else checkpoint
                 return await self._do_patch_only(path, resume, launch, injector)
 
@@ -741,6 +765,11 @@ class Pipeline:
                     detail=f"path={path}",
                     next_actions=("确认选择的是游戏目录或主 exe，然后重新检测。",),
                 )
+
+            # Step 3: 游戏目录必须可写（只读介质/无权限时提前停止）。
+            # 仅提取模式只读游戏资源、只写工作区，允许在只读目录上继续。
+            if not extract_only and not self._ensure_game_dir_writable(path):
+                return False
 
             fast_checkpoint = None
             if not extract_only and not resume_json:
@@ -867,24 +896,39 @@ class Pipeline:
             self._update_progress("checkpoint_load")
             game_checkpoint = _game_meta_path(path, "translation_checkpoint.json")
             if not extract_only and not checkpoint.exists() and game_checkpoint.exists():
-                # 验证 game_checkpoint 不是测试数据残留
-                try:
-                    ckpt_data = json.loads(game_checkpoint.read_text(encoding="utf-8-sig"))
-                    if ckpt_data.get("source") == "mock":
-                        warning(f"检测到测试数据残留 {game_checkpoint}，已忽略")
-                    elif not ckpt_data.get("items"):
-                        warning(f"检查点无有效条目 {game_checkpoint}，已忽略")
-                    else:
-                        checkpoint = game_checkpoint
-                except Exception as e:
-                    warning(f"读取 {game_checkpoint} 失败: {e}")
+                # 游戏目录中的旧检查点只读导入工作区，不能直接成为权威写入目标。
+                # 这对 Program Files、只读介质和没有 _translation_meta 写权限的目录
+                # 很关键：后续增量保存必须始终落在 workspace。
+                imported = pipeline_checkpoint_stage.import_checkpoint_to_workspace(
+                    path,
+                    checkpoint,
+                    legacy_path=game_checkpoint,
+                )
+                if imported is not None:
+                    try:
+                        ckpt_data = json.loads(checkpoint.read_text(encoding="utf-8-sig"))
+                        if ckpt_data.get("source") == "mock":
+                            warning(f"检测到测试数据残留 {game_checkpoint}，已忽略")
+                            checkpoint.unlink(missing_ok=True)
+                        elif not ckpt_data.get("items"):
+                            warning(f"检查点无有效条目 {game_checkpoint}，已忽略")
+                            checkpoint.unlink(missing_ok=True)
+                        else:
+                            info(f"已将游戏目录检查点导入工作区: {checkpoint}")
+                    except Exception as exc:
+                        warning(f"读取导入的检查点失败: {game_checkpoint} ({exc})")
+                        checkpoint.unlink(missing_ok=True)
+                else:
+                    warning(f"未导入可复用的游戏目录检查点: {game_checkpoint}")
             if not extract_only and checkpoint.exists():
                 self._load_checkpoint_into(items, checkpoint)
 
             # 导出/更新 JSON 检查点
             self._update_progress("checkpoint_export")
+            checkpoint = self._save_checkpoint_json(
+                items, path, source_lang, target_lang, checkpoint
+            )
             self._checkpoint_path = checkpoint
-            self._save_checkpoint_json(items, path, source_lang, target_lang, checkpoint)
             info(f"检查点已保存: {checkpoint.name}")
             self.diagnostics.set("checkpoint", str(checkpoint))
             self.diagnostics.set("game_checkpoint", str(game_checkpoint))
@@ -1082,6 +1126,10 @@ class Pipeline:
                     detail=f"path={path}",
                     next_actions=("确认选择的是游戏目录或主 exe，然后重新检测。",),
                 )
+
+            # Step 3: 游戏目录必须可写（只读介质/无权限时提前停止）
+            if not self._ensure_game_dir_writable(path):
+                return False
 
             if self._try_kirikiri_pre_extract_auto_dump(path, engine):
                 if getattr(engine, "_kirikiri_auto_dump_incomplete", False):
@@ -1412,6 +1460,10 @@ class Pipeline:
             "launch": launch,
         })
 
+        # 润色后要回填到游戏目录，只读介质同样无法完成
+        if not self._ensure_game_dir_writable(path):
+            return False
+
         checkpoint = _Path(checkpoint_json) if checkpoint_json else _game_meta_path(path, "translation_checkpoint.json")
         if not checkpoint.exists() and self.workspace:
             fallback = self.workspace.root / "translation_checkpoint.json"
@@ -1467,12 +1519,14 @@ class Pipeline:
         checkpoint.write_text(payload, encoding="utf-8")
         game_checkpoint = _game_meta_path(path, "translation_checkpoint.json")
         if game_checkpoint != checkpoint:
-            game_checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            game_checkpoint.write_text(payload, encoding="utf-8")
+            pipeline_checkpoint_stage.write_game_meta_mirror(self, game_checkpoint, payload)
 
         stats_path = _game_meta_path(path, "polish_stats.json")
-        stats_path.parent.mkdir(parents=True, exist_ok=True)
-        stats_path.write_text(_json.dumps(result.stats.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        pipeline_checkpoint_stage.write_game_meta_mirror(
+            self,
+            stats_path,
+            _json.dumps(result.stats.to_dict(), ensure_ascii=False, indent=2),
+        )
         if self.diagnostics:
             self.diagnostics.set("polish_stats", result.stats.to_dict())
         info(

@@ -488,6 +488,25 @@ def _clean_runtime_capture_text(text: str) -> str:
     stripped = (text or "").replace("\u0000", "").strip()
     if not stripped:
         return ""
+    # Native KRKR hooks may record the whole command around the visible span.
+    # Prefer the dialogue payload and discard script control tails so an old
+    # malformed capture cannot become a permanent translation key.
+    for marker in ("*End", "@SC_EndProcess"):
+        if marker in stripped:
+            stripped = stripped.split(marker, 1)[0].rstrip()
+    start = stripped.find("[>>]")
+    if start >= 0:
+        end = stripped.find("[<<]", start + 4)
+        if end >= 0:
+            stripped = stripped[start + 4:end]
+    elif stripped.startswith("[text]"):
+        stripped = stripped[6:]
+    elif stripped.startswith("[地]"):
+        stripped = stripped[3:]
+    # The capture may still include KAG inline commands after the visible
+    # payload, for example ``[r]`` or ``[p]``.  They are runtime control
+    # markers, never part of the sentence sent to translation.
+    stripped = _strip_inline_kag_tags(stripped)
     out: list[str] = []
     i = 0
     while i < len(stripped):

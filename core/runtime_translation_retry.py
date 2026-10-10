@@ -11,15 +11,19 @@ def translate_with_empty_retry(
     max_attempts: int = 2,
     delay_seconds: float = 0.15,
     on_retry: Callable[[str, int], None] | None = None,
+    accept_translation: Callable[[str], bool] | None = None,
 ) -> str:
     attempts = max(1, int(max_attempts))
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             translated = str(translate_once() or "").strip()
-            if translated and translated != source_text:
+            accepted = bool(translated and translated != source_text)
+            if accepted and accept_translation is not None:
+                accepted = bool(accept_translation(translated))
+            if accepted:
                 return translated
-            reason = "empty"
+            reason = "empty" if not translated else "invalid"
         except Exception as exc:
             last_error = exc
             reason = type(exc).__name__

@@ -296,6 +296,20 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
                 item.translated = safe_cached
                 cache.record_saved_request(source_text, safe_cached)
                 continue
+            if lookup.translated:
+                invalidate = getattr(cache, "invalidate_v2", None)
+                if callable(invalidate):
+                    removed = invalidate(
+                        source_text,
+                        source_lang,
+                        target_lang,
+                        provider=self.name,
+                        model=self._model(),
+                        prompt_version=self.PROMPT_VERSION,
+                        text_type=self._cache_text_type(item, text_type),
+                    )
+                    if removed:
+                        info(f"{self.name} invalid cache removed: {removed}")
             if lookup.key in pending_by_key:
                 duplicates += 1
                 pending_by_key[lookup.key].occurrences += 1
