@@ -21,6 +21,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 
 from config import CONFIG_PATH, get_config, reload_config, save_config
+from core.realtime_translation_guard import realtime_translation_issue
 from core.runtime_translation_context import RollingTranslationContext
 from core.runtime_translation_retry import translate_with_empty_retry
 from engines.base import TextItem
@@ -370,7 +371,9 @@ class TranslationOverlayWindow:
         self.live_translate = bool(getattr(cfg, "kirikiri_overlay_live_translate", True))
         self.follow_window = bool(getattr(cfg, "kirikiri_overlay_follow_window", True))
         self.locked = bool(getattr(cfg, "kirikiri_overlay_locked", False))
-        self._embedded = bool(getattr(cfg, "kirikiri_overlay_embedded", True))
+        # Embedded replacement is opt-in. Realtime KRKR starts in the stable
+        # subtitle-window mode; the user can enable embedding from the window.
+        self._embedded = bool(getattr(cfg, "kirikiri_overlay_embedded", False))
         self.remember_position = bool(getattr(cfg, "kirikiri_overlay_remember_position", True))
         self.saved_x = _clamp_int(getattr(cfg, "kirikiri_overlay_saved_x", -1), -1, -1, 20000)
         self.saved_y = _clamp_int(getattr(cfg, "kirikiri_overlay_saved_y", -1), -1, -1, 20000)
@@ -523,6 +526,8 @@ class TranslationOverlayWindow:
         if not path or not path.exists():
             return {}
         out: dict[str, str] = {}
+        invalid_count = 0
+        target_lang = str(getattr(get_config(), "target_lang", "zh-CN") or "zh-CN")
         try:
             for line in path.read_text(encoding="ascii", errors="ignore").splitlines():
                 if not line or line.startswith("#") or "\t" not in line:
@@ -530,8 +535,14 @@ class TranslationOverlayWindow:
                 src_b64, dst_b64 = line.split("\t", 1)
                 src = base64.b64decode(src_b64).decode("utf-8", errors="ignore")
                 dst = base64.b64decode(dst_b64).decode("utf-8", errors="ignore")
-                if src and dst and src != dst:
+                if src and dst and src != dst and realtime_translation_issue(
+                    src, dst, "ja", target_lang
+                ) is None:
                     out[src] = dst
+                elif src and dst:
+                    invalid_count += 1
+            if invalid_count:
+                self._log(f"local_translation_invalid_skipped count={invalid_count}")
         except Exception as exc:
             self._log(f"map_load_failed: {exc}")
         return out
@@ -1789,14 +1800,19 @@ class TranslationOverlayWindow:
             try:
                 if not original or is_punctuation_only(original):
                     continue
+                target_lang = str(getattr(get_config(), "target_lang", "zh-CN") or "zh-CN")
                 translated = translate_with_empty_retry(
                     lambda: self._translate_live_text(original, context=context, speaker=speaker),
                     original,
+                    accept_translation=lambda value: realtime_translation_issue(
+                        original, value, "ja", target_lang
+                    ) is None,
                     on_retry=lambda reason, attempt: self._log(
                         f"live_translate_retry: attempt={attempt + 1} reason={reason} text={original[:60]}"
                     ),
                 )
-                if translated and translated != original:
+                issue = realtime_translation_issue(original, translated, "ja", target_lang)
+                if translated and issue is None:
                     self._append_local_translation(original, translated)
                     self._enqueue_text(
                         display_original, translated, self._last_seq, speaker,
@@ -1804,7 +1820,7 @@ class TranslationOverlayWindow:
                     )
                     self._log(f"live_translated: {original[:60]}")
                 else:
-                    self._log(f"live_translate_empty: {original[:60]}")
+                    self._log(f"live_translate_missing: reason={issue or 'empty'} text={original[:60]}")
             except Exception as exc:
                 self._log(f"live_translate_failed: {exc}")
             finally:

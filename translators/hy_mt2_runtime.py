@@ -38,7 +38,9 @@ class LocalCompletion:
 class HyMt2Runtime:
     def __init__(self):
         self._lock = threading.RLock()
-        self._request_lock = threading.Lock()
+        self._start_lock = threading.Lock()
+        self._request_gate: threading.BoundedSemaphore | None = None
+        self._request_gate_limit = 0
         self._process: subprocess.Popen | None = None
         self._log_handle = None
         self._port = 0
@@ -46,6 +48,11 @@ class HyMt2Runtime:
         self._active_model = ""
         self._idle_timer: threading.Timer | None = None
         self._inflight = 0
+
+    @property
+    def parallelism(self) -> int:
+        """Maximum number of local requests the active server can process."""
+        return self._configured_parallelism()
 
     @property
     def active_backend(self) -> str:
@@ -96,25 +103,32 @@ class HyMt2Runtime:
         ]
         if not normalized:
             raise ValueError("Hy-MT2 messages cannot be empty")
-        with self._request_lock:
-            self._cancel_idle_timer()
-            with self._lock:
-                self._inflight += 1
-            try:
+        self._cancel_idle_timer()
+        with self._lock:
+            self._inflight += 1
+        try:
+            with self._start_lock:
                 self.ensure_started()
+            request_gate = self._get_request_gate()
+            with request_gate:
                 try:
                     return self._request(normalized, max_tokens, on_token=on_token)
                 except Exception as exc:
                     if self.active_backend == "cpu":
                         raise
+                    with self._lock:
+                        other_requests_active = self._inflight > 1
+                    if other_requests_active:
+                        raise
                     warning(f"Hy-MT2 {self.active_backend} 推理失败，回退 CPU: {exc}")
-                    self.stop()
-                    self._start_backend("cpu", selected_model_name())
+                    with self._start_lock:
+                        self.stop()
+                        self._start_backend("cpu", selected_model_name())
                     return self._request(normalized, max_tokens, on_token=on_token)
-            finally:
-                with self._lock:
-                    self._inflight = max(0, self._inflight - 1)
-                self._schedule_idle_stop()
+        finally:
+            with self._lock:
+                self._inflight = max(0, self._inflight - 1)
+            self._schedule_idle_stop()
 
     def ensure_started(self) -> None:
         with self._lock:
@@ -144,10 +158,12 @@ class HyMt2Runtime:
         """Boot the chosen backend and prove it can generate before install succeeds."""
         selected_model = selected_model_name()
         info(f"[Hy-MT2 部署] 自动启动后端验证: model={selected_model}")
-        with self._request_lock:
-            self._cancel_idle_timer()
+        self._cancel_idle_timer()
+        with self._start_lock:
+            self.ensure_started()
+        request_gate = self._get_request_gate()
+        with request_gate:
             try:
-                self.ensure_started()
                 completion = self._request(
                     [{"role": "user", "content": "Reply with READY only."}],
                     16,
@@ -204,16 +220,16 @@ class HyMt2Runtime:
         selected_path = model_path(selected_model)
         if not executable.is_file() or not selected_path.is_file():
             raise HyMt2ComponentMissingError("Hy-MT2 模型或运行器缺失")
-        config = get_config()
-        context_size = max(1024, min(16384, int(getattr(config, "hy_mt2_context_size", 4096) or 4096)))
+        slot_context_size, total_context_size = self._configured_context_sizes()
+        parallelism = self._configured_parallelism()
         port = _free_port()
         args = [
             str(executable),
             "-m", str(selected_path),
-            "-c", str(context_size),
+            "-c", str(total_context_size),
             "--host", "127.0.0.1",
             "--port", str(port),
-            "--parallel", "1",
+            "--parallel", str(parallelism),
             "--alias", selected_model.lower(),
             "--no-webui",
             "--jinja",
@@ -248,11 +264,43 @@ class HyMt2Runtime:
             if self._health_ready():
                 info(
                     f"Hy-MT2 本地运行时已启动: model={selected_model}, "
-                    f"backend={backend}, context={context_size}"
+                    f"backend={backend}, parallel={parallelism}, "
+                    f"slot_context={slot_context_size}, total_context={total_context_size}"
                 )
                 return
             time.sleep(0.25)
         raise TimeoutError(f"Hy-MT2 {backend} 后端启动超时")
+
+    @staticmethod
+    def _configured_parallelism() -> int:
+        config = get_config()
+        return max(1, min(3, int(getattr(config, "hy_mt2_parallel", 3) or 3)))
+
+    @classmethod
+    def _configured_context_sizes(cls) -> tuple[int, int]:
+        """Return the per-request and server-wide context sizes.
+
+        ``hy_mt2_context_size`` is intentionally defined per request. llama-server
+        needs the aggregate context when multiple parallel slots are enabled;
+        otherwise increasing parallelism silently reduces the context available
+        to each translation request and causes long JSON batches to truncate.
+        """
+        config = get_config()
+        slot_context_size = max(
+            1024,
+            min(16384, int(getattr(config, "hy_mt2_context_size", 4096) or 4096)),
+        )
+        return slot_context_size, slot_context_size * cls._configured_parallelism()
+
+    def _get_request_gate(self) -> threading.BoundedSemaphore:
+        desired = self._configured_parallelism()
+        with self._lock:
+            if self._request_gate is None or (
+                self._request_gate_limit != desired and self._inflight <= 1
+            ):
+                self._request_gate = threading.BoundedSemaphore(desired)
+                self._request_gate_limit = desired
+            return self._request_gate
 
     def _health_ready(self) -> bool:
         if not self._port:

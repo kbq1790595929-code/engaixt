@@ -21,7 +21,7 @@ from core.kirikiri_launcher_policy import (
 from core.launcher import (
     create_bgi_hook_launcher,
     create_godot_display_hook_launcher,
-    create_kirikiri_native_launcher,
+    create_kirikiri_static_launcher,
     launch_game,
     launch_translated_launcher,
     launch_with_injector,
@@ -84,13 +84,13 @@ def enter_kirikiri_runtime_capture_mode(
     if not capture_path.exists():
         capture_path.write_text("", encoding="utf-8")
 
-    warning("KiriKiri 静态提取为空，切换到运行时 hook 捕获模式")
-    info("KiriKiri 捕获模式：启动游戏后推进到文本，hook 会记录新文本；之后重新运行管线即可补翻")
+    warning("KiriKiri 静态提取为空；默认静态路线不会切换到运行时 hook")
+    info("KiriKiri 静态补丁路线需要可读取的脚本或已安装的静态解包工具")
     if pipeline.diagnostics:
-        pipeline.diagnostics.set("runtime_overlay_only", True)
+        pipeline.diagnostics.set("runtime_overlay_only", False)
         pipeline.diagnostics.set("kirikiri_runtime_capture_mode", {
             "enabled": True,
-            "reason": "static_extract_empty",
+            "reason": "static_extract_empty_runtime_disabled",
             "capture": str(capture_path),
             "extract_only": bool(extract_only),
             "launch": bool(launch),
@@ -98,44 +98,23 @@ def enter_kirikiri_runtime_capture_mode(
         pipeline.diagnostics.set("runtime_dump_required", False)
         pipeline.diagnostics.set("static_decrypt_required", False)
         pipeline.diagnostics.warn(
-            "KiriKiri 静态提取为空，已进入运行时 hook 捕获模式",
+            "KiriKiri 静态提取为空，未启动运行时 hook",
             capture=str(capture_path),
         )
         pipeline.diagnostics.suggest(
-            "启动汉化版后推进到剧情文本；关闭游戏后重新点击开始翻译，管线会合并捕获文本并离线补翻。"
+            "先安装或配置可用的 KRKR 静态解包工具，再重新执行提取。"
         )
 
-    launcher: Path | None = None
-    if injector == "frida":
-        info("KiriKiri 使用 Frida 捕获模式启动")
-    else:
-        launcher = create_kirikiri_native_launcher(game_path, engine=engine, checkpoint=checkpoint)
-        if launcher:
-            if pipeline.diagnostics:
-                pipeline.diagnostics.set("kirikiri_native_launcher", str(launcher))
-            if pipeline.manifest:
-                pipeline.manifest.record_created(launcher, kind="runtime", runtime_required=True)
-        else:
-            message = "KiriKiri 原生 hook 启动器创建失败，无法进入默认捕获模式"
-            warning(message)
-            if pipeline.diagnostics:
-                pipeline.diagnostics.warn(message)
-                return pipeline._fail_stage_code(
-                    "runtime",
-                    "runtime_prepare_failed",
-                    detail="KRKR 原生 Hook 启动器创建失败",
-                    rollback=True,
-                    next_actions=("重新安装完整发布包，或点击改用实时翻译前先补齐运行时组件。",),
-                )
-            return False
-
-    pipeline._update_progress("runtime_capture", 90)
-    # This compatibility helper is now preparation-only. A static failure must
-    # never spend API credit or start a game behind the user's back.
-    info("已生成 KiriKiri 运行时捕获启动器；等待用户点击“改用实时翻译”")
-
-    pipeline._write_completion_notice(game_path, engine, mode="KiriKiri 实时捕获/显示层")
-    return True
+    if pipeline.diagnostics:
+        pipeline.diagnostics.set("runtime_capture_disabled", True)
+    return pipeline._fail_kirikiri_static_stage(
+        game_path,
+        engine,
+        checkpoint,
+        stage="script_extract",
+        code="krkr_static_extract_failed",
+        detail="静态提取为空，运行时 hook 已按当前 KRKR 策略禁用",
+    )
 
 def record_modified_outputs(pipeline, game_path: Path, items: list, engine):
     from core import pipeline as _pipeline_mod
@@ -643,8 +622,8 @@ def create_runtime_launchers(pipeline, game_path: Path, engine, checkpoint: Path
         launcher = create_bgi_hook_launcher(game_path, engine=engine, checkpoint=checkpoint)
         diag_key = "bgi_hook_launcher"
     elif engine_name == "kirikiri":
-        launcher = create_kirikiri_native_launcher(game_path, engine=engine, checkpoint=checkpoint)
-        diag_key = "kirikiri_native_launcher"
+        launcher = create_kirikiri_static_launcher(game_path, engine=engine, checkpoint=checkpoint)
+        diag_key = "kirikiri_static_launcher"
     elif engine_name in {"godot", "godot_frida"}:
         launcher = create_godot_display_hook_launcher(game_path, engine=engine, checkpoint=checkpoint)
         diag_key = "godot_display_hook_launcher"
@@ -972,31 +951,12 @@ def _runtime_overlay_note(injector: str | None, engine) -> str:
 
 
 def _kirikiri_should_use_runtime_overlay(engine, game_path: Path, items: list | None = None) -> bool:
-    from core import pipeline as _pipeline_mod
+    del game_path, items
     if getattr(engine, "name", "") != "kirikiri":
         return False
-    if not bool(getattr(get_config(), "kirikiri_enable_static_patch", False)):
-        return True
-    if _has_runtime_capture_items(items or []):
-        return True
-    if _kirikiri_items_have_protected_xp3_filter(items):
-        return True
-    if bool(getattr(engine, "_protected_archives", [])):
-        return True
-    if int(getattr(engine, "_protected_script_count", 0) or 0) > 0:
-        return True
-    diag = _pipeline_mod._read_game_meta_json(game_path, "extract_diagnostics.json")
-    if not diag:
-        return False
-    if int(diag.get("protected_script_count") or 0) > 0:
-        return True
-    if diag.get("protected_archives"):
-        return True
-    layer = str(diag.get("protection_layer") or "")
-    if layer in {"content_filtered", "index_obfuscated", "index_and_content"}:
-        return True
-    if bool(diag.get("static_decrypt_required")):
-        return True
+    # KRKR's normal route is static patching. Protected XP3 files are handled
+    # by the filter-preserving writer or its static archive bridge; they must
+    # not silently switch the whole game to a native hook.
     return False
 
 

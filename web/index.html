@@ -716,10 +716,17 @@
             <option value="16384">16384</option>
           </select>
         </div>
+        <div class="field">
+          <label>本地并发路数</label>
+          <select name="hy_mt2_parallel">
+            <option value="1">1 路</option>
+            <option value="2">2 路</option>
+            <option value="3">3 路（推荐）</option>
+          </select>
+        </div>
         <div class="field"><label>空闲释放时间（秒）</label><input type="text" inputmode="numeric" pattern="[0-9]*" name="hy_mt2_idle_timeout_seconds"></div>
-        <div class="field"><label>推理队列</label><input type="text" value="单实例串行" disabled></div>
       </div>
-      <div class="settings-note local-model-scope-note">本地模型只使用本页参数；云端每批条数、云端并发数和 API 设置不会参与本地推理。</div>
+      <div class="settings-note local-model-scope-note">本地模型只使用本页参数；并发越高速度越快，但会增加显存和内存占用。云端每批条数、云端并发数和 API 设置不会参与本地推理。</div>
       <div class="hy-mt2-component" id="hy-mt2-component">
         <div class="hy-mt2-component-head">
           <div>

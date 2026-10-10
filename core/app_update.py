@@ -22,7 +22,7 @@ from core.resources import app_root
 
 
 APP_NAME = "EngAixt"
-APP_VERSION = "1.1.15"
+APP_VERSION = "1.1.12"
 UPDATE_BASE_URL = "https://engaixt.com/updates"
 USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 HTTP_RETRIES = 4

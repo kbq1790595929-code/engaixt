@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import uuid
 from pathlib import Path
 from utils.logger import info, debug, warning
@@ -66,10 +67,35 @@ class Workspace:
         info(f"已从备份恢复: {target}")
         return True
 
-    def cleanup(self):
-        if self.root.exists():
-            shutil.rmtree(self.root)
-            info(f"工作区已清理: {self.root}")
+    def cleanup(self) -> bool:
+        """Best-effort cleanup that never turns a completed translation into failure.
+
+        Windows may briefly keep a just-written checkpoint open (for example
+        while an indexer or another process is scanning it).  Retry short
+        transient locks, then keep the workspace for recovery if the lock
+        persists.  Cleanup is housekeeping, so callers must not lose a
+        successful translation because this step cannot remove a temp folder.
+        """
+        if not self.root.exists():
+            return True
+
+        delays = (0.05, 0.2, 0.5, 1.0)
+        last_error: OSError | None = None
+        for attempt, delay in enumerate(delays):
+            try:
+                shutil.rmtree(self.root)
+                info(f"工作区已清理: {self.root}")
+                return True
+            except OSError as exc:
+                last_error = exc
+                if attempt + 1 < len(delays):
+                    time.sleep(delay)
+
+        warning(
+            f"工作区清理失败，已保留以便恢复: {self.root}"
+            f" ({last_error})"
+        )
+        return False
 
 
 def safe_replace(target_file: Path) -> Path:

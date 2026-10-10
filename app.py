@@ -323,6 +323,8 @@ class Api:
 
             "hy_mt2_batch_size": c.hy_mt2_batch_size,
 
+            "hy_mt2_parallel": c.hy_mt2_parallel,
+
             "hy_mt2_idle_timeout_seconds": c.hy_mt2_idle_timeout_seconds,
 
             "active_translator": c.active_translator,

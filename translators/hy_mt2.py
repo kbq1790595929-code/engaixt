@@ -29,6 +29,7 @@ from utils.text_extract import (
     validation_source_for_item,
 )
 from utils.logger import info, warning
+from core.realtime_translation_guard import realtime_translation_issue
 
 
 class HyMt2Translator(DeepSeekTranslator):
@@ -37,7 +38,7 @@ class HyMt2Translator(DeepSeekTranslator):
     MODEL = MODEL_NAME
     MODEL_CONFIG_FIELD = "hy_mt2_model"
     PROMPT_VERSION = "hy_mt2_game_batch_v3"
-    REALTIME_PROMPT_VERSION = "hy_mt2_realtime_context_v3"
+    REALTIME_PROMPT_VERSION = "hy_mt2_realtime_context_v4"
     MAX_INPUT_TOKENS = 3000
     MAX_MESSAGE_BATCH = 8
 
@@ -78,7 +79,7 @@ class HyMt2Translator(DeepSeekTranslator):
             meta={"kind": "message", "runtime_capture": True},
         )
         cache = get_cache()
-        cached = cache.lookup(
+        cache_lookup = cache.lookup(
             source,
             source_lang,
             target_lang,
@@ -86,17 +87,35 @@ class HyMt2Translator(DeepSeekTranslator):
             model=self._model(),
             prompt_version=self.REALTIME_PROMPT_VERSION,
             text_type="message",
-        ).translated
+        )
+        cached = cache_lookup.translated
         valid_cached = self._valid_cached_translation_for_item(
             item, cached, source_lang, target_lang
         )
         if valid_cached:
             return valid_cached
+        if cached:
+            invalidate = getattr(cache, "invalidate_v2", None)
+            if callable(invalidate):
+                removed = invalidate(
+                    source,
+                    source_lang,
+                    target_lang,
+                    provider=self.name,
+                    model=self._model(),
+                    prompt_version=self.REALTIME_PROMPT_VERSION,
+                    text_type="message",
+                )
+                if removed:
+                    info(f"Hy-MT2 realtime invalid cache removed: {removed}")
 
         protected, _placeholders = protect_placeholders(source)
         direct_prompt = (
             "Translate the following Japanese game text into Simplified Chinese. "
             "Preserve names, punctuation, line breaks, and placeholders. "
+            "Short one-character or two-character reactions, onomatopoeia, interjections, "
+            "and pure-kanji Japanese words are visible text and must also be translated. "
+            "Never copy Japanese unchanged; use a concise natural Chinese equivalent. "
             "Output only the translation, without explanation.\n" + protected
         )
         realtime_context = self._normalize_realtime_context(context or [])
@@ -121,6 +140,8 @@ class HyMt2Translator(DeepSeekTranslator):
                 item, completion.content, source_lang, target_lang, []
             )
         if not candidate:
+            return ""
+        if realtime_translation_issue(source, candidate, source_lang, target_lang):
             return ""
         cache.set_v2(
             source,
@@ -220,7 +241,9 @@ class HyMt2Translator(DeepSeekTranslator):
                 "Translate only the latest Japanese user message into natural Simplified Chinese. "
                 "Earlier user/assistant pairs are context only. Preserve names, tone, punctuation, "
                 "line breaks, and placeholders. Prefer idiomatic conversational Chinese over "
-                "word-for-word translation. Output only the translation."
+                "word-for-word translation. Translate even one-character reactions, short "
+                "onomatopoeia, interjections, and pure-kanji Japanese words; never echo Japanese "
+                "unchanged. Output only the translation."
             ),
         }]
         for entry in context:
@@ -308,14 +331,30 @@ class HyMt2Translator(DeepSeekTranslator):
             f"（{len(batches)} 批，最多 {self.MAX_MESSAGE_BATCH} 条/批，"
             f"合并 {duplicates} 条重复文本，费用 ¥0）"
         )
-        info("Hy-MT2 本地调度：单实例串行；云端每批条数与云端并发数不参与本地推理")
-        for index, batch in enumerate(batches, 1):
-            await self._translate_local_batch(batch, source_lang, target_lang)
-            completed += sum(item.occurrences for item in batch.items)
+        parallelism = max(1, min(3, int(getattr(self._runtime, "parallelism", 1) or 1)))
+        info(
+            "Hy-MT2 本地调度："
+            f"{parallelism} 路并发，服务端请求槽位与翻译批次同步"
+        )
+        # Start all slots immediately. Runtime startup is protected by its
+        # lifecycle lock, while independent batches can decode concurrently.
+        position = 0
+        while position < len(batches):
+            window = batches[position:position + parallelism]
+            await asyncio.gather(*(
+                self._translate_local_batch(part, source_lang, target_lang)
+                for part in window
+            ))
+            completed += sum(
+                item.occurrences
+                for part in window
+                for item in part.items
+            )
             if on_progress:
                 on_progress(min(completed, total), total)
-            if index == 1:
+            if position == 0:
                 info(f"Hy-MT2 首批翻译完成，后端={self._runtime.active_backend}")
+            position += len(window)
 
         self._propagate_by_cache_key(items, pending, source_lang, target_lang)
         self._finalize(items, source_lang, target_lang)
@@ -416,15 +455,24 @@ class HyMt2Translator(DeepSeekTranslator):
         self._record_batch_request(batch, cache)
         try:
             request_started = time.perf_counter()
-            self._begin_live_speed()
-            completion = await asyncio.to_thread(
-                self._complete_local_prompt,
-                prompt,
-                max_tokens,
-            )
+            streamed_tokens = [0]
+
+            def on_stream_chunk(count: int = 1) -> None:
+                amount = max(0, int(count or 0))
+                streamed_tokens[0] += amount
+                self._on_stream_chunk(amount)
+
+            try:
+                completion = await asyncio.to_thread(
+                    self._complete_local_prompt,
+                    prompt,
+                    max_tokens,
+                    on_stream_chunk,
+                )
+            finally:
+                self._remove_live_tokens(streamed_tokens[0])
             request_elapsed = time.perf_counter() - request_started
-            live_tokens = self._finish_live_speed()
-            completion_tokens = int(completion.completion_tokens or live_tokens)
+            completion_tokens = int(completion.completion_tokens or streamed_tokens[0])
             self._record_speed(
                 completion_tokens,
                 completion.elapsed_seconds or request_elapsed,
@@ -521,27 +569,28 @@ class HyMt2Translator(DeepSeekTranslator):
             for pending in invalid:
                 pending.item.translated = pending.item.original
 
-    def _complete_local_prompt(self, prompt: str, max_tokens: int):
+    def _complete_local_prompt(self, prompt: str, max_tokens: int, on_token=None):
         complete_with_progress = getattr(self._runtime, "complete_with_progress", None)
         if callable(complete_with_progress):
-            return complete_with_progress(prompt, max_tokens, self._on_stream_chunk)
+            return complete_with_progress(
+                prompt,
+                max_tokens,
+                on_token or self._on_stream_chunk,
+            )
         return self._runtime.complete(prompt, max_tokens)
-
-    def _begin_live_speed(self) -> None:
-        with self._speed_lock:
-            self._speed_live_tokens = 0
-            self._speed_live_started_at = time.perf_counter()
 
     def _on_stream_chunk(self, count: int = 1) -> None:
         with self._speed_lock:
-            self._speed_live_tokens += max(0, int(count or 0))
+            amount = max(0, int(count or 0))
+            self._speed_live_tokens += amount
+            if amount and not self._speed_live_started_at:
+                self._speed_live_started_at = time.perf_counter()
 
-    def _finish_live_speed(self) -> int:
+    def _remove_live_tokens(self, count: int) -> None:
         with self._speed_lock:
-            count = self._speed_live_tokens
-            self._speed_live_tokens = 0
-            self._speed_live_started_at = 0.0
-            return count
+            self._speed_live_tokens = max(0, self._speed_live_tokens - max(0, count))
+            if not self._speed_live_tokens:
+                self._speed_live_started_at = 0.0
 
     def _record_speed(self, generated_tokens: int, elapsed_seconds: float) -> None:
         generated = max(0, int(generated_tokens or 0))
@@ -572,12 +621,17 @@ class HyMt2Translator(DeepSeekTranslator):
             live_started_at = self._speed_live_started_at
         live_elapsed = max(0.0, time.perf_counter() - live_started_at) if live_started_at else 0.0
         visible_tokens = self._speed_generated_tokens + live_tokens
-        visible_seconds = self._speed_inference_seconds + live_elapsed
+        wall_elapsed = time.perf_counter() - self._speed_started_at
+        visible_seconds = max(0.001, wall_elapsed)
         average = visible_tokens / max(0.001, visible_seconds)
         live_current = live_tokens / max(0.001, live_elapsed) if live_started_at else 0.0
-        current = live_current if live_started_at and live_tokens else self._speed_last_instant
-        if instant is not None:
-            current = float(instant)
+        current = (
+            live_current
+            if live_started_at and live_tokens
+            else average
+            if visible_tokens
+            else self._speed_last_instant
+        )
         payload = {
             "provider": self.name,
             "model": self._model(),
@@ -596,7 +650,8 @@ class HyMt2Translator(DeepSeekTranslator):
     def _log_speed(self, *, instant: float | None = None, final: bool = False) -> None:
         if not self._speed_generated_tokens or not self._speed_started_at:
             return
-        average = self._speed_generated_tokens / max(0.001, self._speed_inference_seconds)
+        wall_elapsed = time.perf_counter() - self._speed_started_at
+        average = self._speed_generated_tokens / max(0.001, wall_elapsed)
         if final:
             self._emit_speed(instant=instant, final=True)
             info(

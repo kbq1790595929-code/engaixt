@@ -81,7 +81,18 @@ def run_detection_stage(pipeline, path: Path, injector: str | None):
     for suggestion in preflight.get("suggestions", []):
         pipeline.diagnostics.suggest(suggestion)
     if not preflight.get("ok", True):
-        pipeline.diagnostics.warn("预检发现缺失依赖，流程会继续但成功率可能下降")
+        blocking = {
+            str(check.get("name") or "")
+            for check in preflight.get("checks", [])
+            if check.get("status") == "missing" and check.get("required", True)
+        }
+        if "game_dir_writable" in blocking:
+            pipeline.diagnostics.warn(
+                "游戏目录不可写（只读介质或权限不足），回填与检查点无法写回游戏目录",
+                dir=str(path),
+            )
+        else:
+            pipeline.diagnostics.warn("预检发现缺失依赖，流程会继续但成功率可能下降")
     return engine, injector
 
 

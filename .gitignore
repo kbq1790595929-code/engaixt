@@ -1,106 +1,28 @@
 __pycache__/
 *.pyc
 *.pyo
-.backups/
-.nwjs_test/
-_tool_outputs/
 .pytest_cache/
-
-# Codex/local debugging artifacts
 .codex_runs/
-.codex_video_frames/
-tmp_video_frames/
 diagnostics/
 *.log
 
-# Build outputs
 build/
 dist/
-obj/
-bin/
-release_artifacts/
 build_data/
-
-# Native build outputs. test_hook.dll is produced next to the sources by
-# build.ps1; only the published runtime under assets/ is source-of-record.
-native/kirikiri_runtime/*.dll
-native/kirikiri_runtime/*.old-*
-
-# Debug artifacts (screenshots, probe outputs)
-artifacts/
-
-# Runtime/local state
+release_artifacts/
+downloads/
 profiles/
 _translation_meta/
-.wrangler/
 
-# External tool download caches
-downloads/
-tools/_downloads/
-
-# Local native build toolchains/caches
 native/toolchains/
-
-# Legacy copies kept for reference only (old repo history bundles, superseded
-# build_data archives, archived paid-edition modules). Never part of a build.
-archive/
-
-# site/downloads holds the split release package that gets uploaded; the site
-# source itself (html/css/img) stays tracked.
-site/downloads/
-
-# Development-only material is maintained in the private source repository.
-docs/
-scripts/
-tests/
-tools/
-vendor/
-site/
-
-# Bundled third-party tool binaries. These are assembled at packaging time and
-# downloaded on demand at runtime by core.tool_manager, matching the intent
-# already stated in game-translator.spec ("the source tree intentionally does
-# not vendor third-party binaries by default"). Committing this tree put
-# ~109 MB of other people's binaries -- and GARbro's per-game format indexes --
-# into the repository.
-#
-# The small textual provenance records under it ARE tracked, because they are
-# source rather than artifacts: components.json is the version/source/license/
-# sha256 manifest for every KiriKiri sidecar, and msg_tool's notice pair is
-# required by its GPL-3.0 license. Whitelisting is deliberate -- a new binary
-# dropped in here will not be committed by accident.
+assets/*.zip
 _internal/tools/*
 !_internal/tools/kirikiri/
-_internal/tools/kirikiri/*
-!_internal/tools/kirikiri/components.json
-!_internal/tools/kirikiri/README.md
-!_internal/tools/kirikiri/msg_tool/
-_internal/tools/kirikiri/msg_tool/*
-!_internal/tools/kirikiri/msg_tool/LICENSE-GPL-3.0.txt
-!_internal/tools/kirikiri/msg_tool/SOURCE.txt
 
-# The lora_dataset tooling is source, not a vendored binary: it is imported by
-# tests and by tools/build_lora_dataset.py. Everything else under tools/ is a
-# third-party project or binary (rpgmad and its Rust sources, RPGMakerDecrypter)
-# and stays out of the repository.
+archive/
+site/
 tools/*
-!tools/lora_dataset/
 !tools/build_lora_dataset.py
-tools/lora_dataset/__pycache__/
-
-# Local KiriKiri probes: not shipped.
-# frida/kirikiri_realtime_hook.js is tracked explicitly (git add with its path,
-# not through an ignore exception) because the published test suite asserts on
-# its contents; .gitignore can only exclude, never include.
-frida/kirikiri_text_probe.js
-frida/probe_kirikiri_text.py
-
-# _internal/licenses is deliberately NOT ignored: it holds the MIT and GPL-3.0
-# texts that must ship alongside those binaries, and game-translator.spec
-# copies it into the distribution. Source input, not a build artifact.
-
-# Debug symbols: never ship these.
-*.pdb
-*.ilk
-*.exp
-*.lib
+!tools/lora_dataset/
+!tools/lora_dataset/**
+vendor/
