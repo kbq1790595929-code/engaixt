@@ -13,9 +13,7 @@ Type bytes:
   'e' = extended
 """
 
-import struct
 import re
-from pathlib import Path
 
 
 # Fields that reference image filenames (must NOT be translated)
@@ -61,6 +59,8 @@ class MarshalStream:
         self.symbols: list[str] = []  # symbol table for links
 
     def read_byte(self) -> int:
+        if self.pos >= len(self.data):
+            raise ValueError("Truncated Ruby Marshal data")
         b = self.data[self.pos]
         self.pos += 1
         return b
@@ -68,30 +68,20 @@ class MarshalStream:
     def read_long(self) -> int:
         """Read a Marshal long (variable-length integer)."""
         b = self.read_byte()
-        if b == 0:
+        signed = b if b < 128 else b - 256
+        if signed == 0:
             return 0
-        if 5 < b < 128:  # 1-123 stored as n+5
-            return b - 5
-        if b == 1:  # 1 byte follows
-            return self.read_byte()
-        if b == 2:  # 2 bytes LE
-            lo = self.read_byte()
-            hi = self.read_byte()
-            return lo | (hi << 8)
-        if b == 3:  # 3 bytes LE
-            b0 = self.read_byte()
-            b1 = self.read_byte()
-            b2 = self.read_byte()
-            return b0 | (b1 << 8) | (b2 << 16)
-        if b == 4:  # 4 bytes LE
-            return struct.unpack_from("<I", self.data, self.pos - 1)[0] >> 8
-        if b == 255:  # negative step
-            neg_step = self.read_byte()
-            return -(256 - neg_step)
-        # For larger values
-        return b
+        if signed > 4:
+            return signed - 5
+        if signed < -4:
+            return signed + 5
+        raw = self.read_bytes(abs(signed))
+        value = int.from_bytes(raw, "little")
+        return value if signed > 0 else value - (1 << (8 * len(raw)))
 
     def read_bytes(self, n: int) -> bytes:
+        if n < 0 or n > len(self.data) - self.pos:
+            raise ValueError("Invalid length or truncated Ruby Marshal data")
         result = self.data[self.pos:self.pos + n]
         self.pos += n
         return result
@@ -161,6 +151,8 @@ def replace_strings_in_marshal_full(data: bytes, translations: dict[str, str]) -
     _verify_version(stream)
     output = bytearray(b"\x04\x08")
     _read_and_replace(stream, output, translations)
+    if stream.pos != len(data):
+        raise ValueError("Unexpected trailing Ruby Marshal data")
     return bytes(output)
 
 
@@ -170,6 +162,8 @@ def replace_any_strings_in_marshal_full(data: bytes, translations: dict[str, str
     _verify_version(stream)
     output = bytearray(b"\x04\x08")
     _read_and_replace(stream, output, translations, only_translatable=False)
+    if stream.pos != len(data):
+        raise ValueError("Unexpected trailing Ruby Marshal data")
     return bytes(output)
 
 
@@ -219,20 +213,7 @@ def _read_value(stream: MarshalStream, strings: list[str], skip: bool = False):
             if is_translatable(text):
                 strings.append(text)
     elif type_byte == 'I':  # string with encoding/ivars (wraps a regular string)
-        type_byte2 = stream.read_type()
-        if type_byte2 == '"':
-            length = stream.read_long()
-            raw = stream.read_bytes(length)
-            if not skip:
-                try:
-                    text = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = raw.decode("shift-jis", errors="replace")
-                if is_translatable(text):
-                    strings.append(text)
-        else:
-            # Fallback: not a regular string, skip
-            pass
+        _read_value(stream, strings, skip)
         # Read ivars count and skip ivars
         ivar_count = stream.read_long()
         for _ in range(ivar_count):
@@ -278,23 +259,7 @@ def _read_value(stream: MarshalStream, strings: list[str], skip: bool = False):
 
 def _read_fixnum(stream: MarshalStream) -> int:
     """Read a fixnum from the stream."""
-    b = stream.read_byte()
-    if b == 0:
-        return 0
-    if 5 < b < 128:
-        return b - 5
-    if b == 1:
-        return stream.read_byte()
-    if b == 2:
-        return stream.read_byte() | (stream.read_byte() << 8)
-    if b == 3:
-        return stream.read_byte() | (stream.read_byte() << 8) | (stream.read_byte() << 16)
-    if b == 4:
-        return struct.unpack_from("<I", stream.data, stream.pos - 1)[0] >> 8
-    # Negative
-    if 252 > b > 128:
-        return b - 256
-    return b
+    return stream.read_long()
 
 
 def _read_bignum(stream: MarshalStream) -> int:
@@ -356,19 +321,7 @@ def _read_and_replace(stream: MarshalStream, output: bytearray, translations: di
             _write_replaced_string(output, raw, length, translations, only_translatable)
 
     elif type_byte == 'I':
-        # I-string wraps a regular string + encoding ivars
-        type_byte2 = stream.read_type()
-        output.append(ord(type_byte2))
-        if type_byte2 == '"':
-            length = stream.read_long()
-            raw = stream.read_bytes(length)
-            if skip:
-                _write_long(output, length)
-                output.extend(raw)
-            else:
-                _write_replaced_string(output, raw, length, translations, only_translatable)
-        else:
-            pass
+        _read_and_replace(stream, output, translations, skip, only_translatable)
         # Copy ivars
         ivar_count = stream.read_long()
         _write_long(output, ivar_count)
@@ -455,48 +408,24 @@ def _write_long(output: bytearray, value: int):
         output.append(0)
     elif 0 < value < 123:
         output.append(value + 5)
-    elif value < 256:
-        output.append(1)
-        output.append(value)
-    elif value < 65536:
-        output.append(2)
-        output.append(value & 0xFF)
-        output.append((value >> 8) & 0xFF)
-    elif value < 16777216:
-        output.append(3)
-        output.append(value & 0xFF)
-        output.append((value >> 8) & 0xFF)
-        output.append((value >> 16) & 0xFF)
+    elif -124 < value < 0:
+        output.append((value - 5) & 0xFF)
     else:
-        b = value.to_bytes(4, "little")
-        output.append(4)
-        output.extend(b[:4])
-    # Note: simplified - doesn't handle negative values or very large values
+        for size in range(1, 5):
+            if (0 <= value < (1 << (size * 8))) or (-(1 << (size * 8)) <= value < 0):
+                output.append(size if value >= 0 else 256 - size)
+                output.extend((value & ((1 << (size * 8)) - 1)).to_bytes(size, "little"))
+                return
+        raise ValueError("Ruby Marshal integer exceeds 32-bit long range")
 
 
 def _copy_fixnum(stream: MarshalStream, output: bytearray):
     """Copy a fixnum without modifying."""
     b = stream.read_byte()
     output.append(b)
-    if b == 0:
-        pass
-    elif 5 < b < 128:
-        pass
-    elif b == 1:
-        output.append(stream.read_byte())
-    elif b == 2:
-        output.append(stream.read_byte())
-        output.append(stream.read_byte())
-    elif b == 3:
-        output.append(stream.read_byte())
-        output.append(stream.read_byte())
-        output.append(stream.read_byte())
-    elif b == 4:
-        output.append(stream.read_byte())
-        output.append(stream.read_byte())
-        output.append(stream.read_byte())
-        output.append(stream.read_byte())
-    # else: negative or special - just copy what we have
+    signed = b if b < 128 else b - 256
+    if 0 < abs(signed) <= 4:
+        output.extend(stream.read_bytes(abs(signed)))
 
 
 def _copy_bignum(stream: MarshalStream, output: bytearray):

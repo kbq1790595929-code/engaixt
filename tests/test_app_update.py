@@ -211,6 +211,38 @@ def test_app_update_reuses_verified_existing_package(tmp_path, monkeypatch):
     assert stale_fixed_part.read_bytes() == b"locked by previous run"
 
 
+def test_app_update_downloads_direct_github_package(tmp_path, monkeypatch):
+    payload = b"direct github update zip"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    dest = tmp_path / "EngAixt-1.1.16-Windows-x64-1.1.16.zip"
+    monkeypatch.setattr(app_update, "_updates_dir", lambda: tmp_path)
+
+    def fake_download(url, path, **kwargs):
+        assert url == (
+            "https://github.com/kbq1790595929-code/engaixt/releases/download/"
+            "v1.1.16/EngAixt-1.1.16-Windows-x64.zip"
+        )
+        path.write_bytes(payload)
+
+    monkeypatch.setattr(app_update, "_download_part_to_path", fake_download)
+
+    result = app_update.download_update_package(
+        {
+            "version": "1.1.16",
+            "filename": "EngAixt-1.1.16-Windows-x64.zip",
+            "package_url": (
+                "https://github.com/kbq1790595929-code/engaixt/releases/download/"
+                "v1.1.16/EngAixt-1.1.16-Windows-x64.zip"
+            ),
+            "size": len(payload),
+            "sha256": expected_sha,
+        }
+    )
+
+    assert result == dest
+    assert result.read_bytes() == payload
+
+
 def test_app_update_temp_path_is_unique_and_not_legacy_fixed_part(tmp_path):
     dest = tmp_path / "EngAixt-Windows-Trial-1.1.0.zip"
 

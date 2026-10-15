@@ -25,4 +25,13 @@ tools/*
 !tools/build_lora_dataset.py
 !tools/lora_dataset/
 !tools/lora_dataset/**
+!tools/rgss_compare/
+!tools/rgss_compare/**
+!tools/release/
+!tools/release/branding.json
+!tools/release/verify_branding.py
+!tools/release/baseline-files.json
+!tools/release/release.ps1
+tools/**/__pycache__/
+tools/**/*.pyc
 vendor/
