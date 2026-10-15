@@ -22,7 +22,7 @@ from core.resources import app_root
 
 
 APP_NAME = "EngAixt"
-APP_VERSION = "1.1.12"
+APP_VERSION = "1.1.17"
 UPDATE_BASE_URL = "https://engaixt.com/updates"
 USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 HTTP_RETRIES = 4
@@ -98,6 +98,18 @@ def download_update_package(
     *,
     progress_callback: ProgressCallback | None = None,
 ) -> Path:
+    package_url = str(
+        manifest.get("package_url")
+        or manifest.get("download_url")
+        or ""
+    ).strip()
+    if package_url:
+        return _download_direct_update_package(
+            manifest,
+            package_url,
+            progress_callback=progress_callback,
+        )
+
     package_manifest_url = str(
         manifest.get("package_manifest_url")
         or manifest.get("url")
@@ -208,6 +220,69 @@ def download_update_package(
     _emit(progress_callback, {
         "phase": "download_done",
         "downloaded": total_done,
+        "size": expected_size,
+        "message": "Update package downloaded",
+    })
+    return dest
+
+
+def _download_direct_update_package(
+    manifest: dict[str, Any],
+    package_url: str,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> Path:
+    parsed = urllib.parse.urlparse(package_url)
+    filename = str(manifest.get("filename") or Path(parsed.path).name or "EngAixt-update.zip")
+    expected_sha = str(manifest.get("sha256") or "").lower().strip()
+    expected_size = int(manifest.get("size") or 0)
+    updates_dir = _updates_dir()
+    updates_dir.mkdir(parents=True, exist_ok=True)
+    version = _safe_name(str(manifest.get("version") or "latest"))
+    dest = updates_dir / f"{Path(filename).stem}-{version}.zip"
+    if _verify_existing_update_package(dest, expected_size, expected_sha):
+        _emit(progress_callback, {
+            "phase": "download_done",
+            "downloaded": expected_size or dest.stat().st_size,
+            "size": expected_size,
+            "message": "Update package already downloaded",
+        })
+        return dest
+
+    tmp = _make_update_temp_path(dest)
+    try:
+        _emit(progress_callback, {
+            "phase": "download",
+            "index": 1,
+            "total": 1,
+            "downloaded": 0,
+            "size": expected_size,
+            "message": "Downloading update package",
+        })
+        _download_part_to_path(
+            package_url,
+            tmp,
+            timeout=1200,
+            progress_callback=progress_callback,
+            base_downloaded=0,
+            total_size=expected_size,
+            index=1,
+            total=1,
+        )
+        actual_size = tmp.stat().st_size
+        if expected_size and actual_size != expected_size:
+            raise AppUpdateError("update package size verification failed")
+        actual_sha = _sha256_file(tmp)
+        if expected_sha and actual_sha != expected_sha:
+            raise AppUpdateError("update package sha256 verification failed")
+        tmp.replace(dest)
+    except Exception:
+        _unlink_quiet(tmp)
+        raise
+
+    _emit(progress_callback, {
+        "phase": "download_done",
+        "downloaded": actual_size,
         "size": expected_size,
         "message": "Update package downloaded",
     })

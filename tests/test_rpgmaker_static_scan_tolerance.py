@@ -24,15 +24,19 @@ def _make_game(tmp_path: Path) -> Path:
     (data / "System.json").write_bytes(
         b"\xef\xbb\xbf" + json.dumps({"gameTitle": "テストゲーム"}).encode("utf-8")
     )
-    # 明文地图与数据库
-    (data / "Map001.json").write_text(json.dumps({
-        "events": [None, {
-            "id": 1, "name": "EV001",
-            "pages": [{"list": [
-                {"code": 401, "parameters": ["こんにちは、世界"]},
-            ]}],
-        }],
-    }), encoding="utf-8")
+    # 带 BOM 的地图 JSON，以及普通 UTF-8 数据库
+    (data / "Map001.json").write_bytes(
+        b"\xef\xbb\xbf" + json.dumps({
+            "mapId": 1,
+            "events": [None, {
+                "id": 1, "name": "EV001",
+                "pages": [{"list": [
+                    {"code": 401, "parameters": ["こんにちは、世界"]},
+                    {"code": 401, "parameters": ["\\N<ヒカリ>さあ！勝負よ！！"]},
+                ]}],
+            }],
+        }, ensure_ascii=False).encode("utf-8")
+    )
     (data / "Actors.json").write_text(json.dumps(
         [None, {"id": 1, "name": "サキュバス", "profile": "テスト"}]
     ), encoding="utf-8")
@@ -50,6 +54,7 @@ def test_scan_static_reads_bom_json(tmp_path: Path):
     items = _scan_static(_make_game(tmp_path))
     texts = [item.original for item in items]
     assert any("テストゲーム" in t for t in texts), "带 BOM 的 System.json 必须能解析"
+    assert any("さあ！勝負よ！！" in t for t in texts), "带 BOM 的 Map*.json 中事件文本必须提取"
 
 
 def test_load_data_json_returns_none_for_garbage(tmp_path: Path):

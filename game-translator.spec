@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
+from pathlib import Path
 
 datas = [
     ('build_data', 'data'),
@@ -50,6 +51,7 @@ exe = EXE(
     exclude_binaries=True,
     name='game-translator',
     icon='web/app.ico',
+    version='version_info.txt' if Path('version_info.txt').exists() else None,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

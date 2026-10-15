@@ -1,26 +1,22 @@
-"""RPG Maker Engine (MV/MZ/VX/VXAce).
+"""RPG Maker engine with separate MV/MZ and static RGSS routes.
 
 MV/MZ: Runtime hook pipeline — scan game data in-memory, translate, replace at display layer.
        Never modifies JSON data files. Zero risk to game logic.
 
-VX/VXAce: Static extraction from Marshal .rvdata2 + .rgss3a archives.
+XP/VX/VX Ace: Static Marshal extraction and verified game-file deployment.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
-import struct
 from pathlib import Path
 
 from engines.base import EngineBase, EngineCapabilities, TextItem, registry
-from utils.logger import info, debug, warning
-from utils.rgss3a import extract_rgss3a, pack_rgss3a, get_archive_metadata
+from engines.rpgmaker_rgss import RGSSStatic, deploy_changes, find_archives, find_data_files
+from utils.logger import info, warning
+from utils.rgss_archive import safe_relative_name
 from utils.rvdata2 import (
-    extract_strings_from_marshal,
     replace_any_strings_in_marshal_full,
-    replace_strings_in_marshal_full,
-    set_resource_names,
 )
 from utils.text_extract import is_translatable
 
@@ -49,8 +45,7 @@ class RPGMakerEngine(EngineBase):
 
     def __init__(self):
         super().__init__()
-        self._rgss3a_path: Path | None = None
-        self._rgss3a_key: int | None = None
+        self._rgss_static: RGSSStatic | None = None
         self._is_vxace: bool = False
         self._is_mv_mz: bool = False
         self._is_xp_mkxp: bool = False
@@ -139,17 +134,21 @@ class RPGMakerEngine(EngineBase):
 
     def unpack(self, path: Path, workspace: Path) -> list[TextItem]:
         game_dir = path if path.is_dir() else path.parent
+        self._game_dir = game_dir
+        self._rgss_static = None
+        self._is_vxace = self._is_mv_mz = self._is_xp_mkxp = False
 
-        # VX/VXAce: static extraction from Marshal archives
-        rgss3a_files = list(game_dir.glob("*.rgss3a"))
-        rvdata_files = list(game_dir.glob("Data/*.rvdata2"))
-        rxdata_files = list(game_dir.glob("Data/*.rxdata"))
+        archives = find_archives(game_dir)
+        data_files = find_data_files(game_dir)
+        rxdata_files = [file for file in data_files if file.suffix.lower() == ".rxdata"]
         if rxdata_files and _has_po_localization(game_dir):
             return self._unpack_xp_mkxp(game_dir, workspace, rxdata_files)
-        if rgss3a_files or (rvdata_files and not (game_dir / "www" / "data").is_dir() and not (game_dir / "data").is_dir()):
-            return self._unpack_vxace(game_dir, workspace, rgss3a_files, rvdata_files)
-        if rxdata_files and not (game_dir / "www" / "data").is_dir():
+        if rxdata_files and not archives:
             return self._unpack_xp_mkxp(game_dir, workspace, rxdata_files)
+        if archives or data_files:
+            self._is_vxace = True
+            self._rgss_static = RGSSStatic(game_dir, workspace)
+            return self._rgss_static.unpack()
 
         # MV/MZ: static/runtime scan only. The shared pipeline owns cache,
         # cost checks, batching, and translator selection.
@@ -168,12 +167,20 @@ class RPGMakerEngine(EngineBase):
         if not items:
             return
 
-        if self._is_vxace:
-            self._repack_vxace(items, workspace)
-            return
-
-        if self._is_xp_mkxp:
+        po_items = any(item.meta.get("source_kind") == "po_localization" for item in items)
+        marshal_items = any(Path(item.file).suffix.lower() in {".rxdata", ".rvdata", ".rvdata2"} for item in items)
+        if po_items and marshal_items:
+            raise ValueError("RPG Maker checkpoint mixes PO localization and RGSS data routes")
+        if po_items:
             self._repack_xp_mkxp(items, workspace)
+            return
+        if marshal_items:
+            game_dir = Path(self._game_dir) if hasattr(self, "_game_dir") else None
+            if game_dir is None:
+                raise ValueError("RGSS repack requires the actual game directory")
+            if self._rgss_static is None or self._rgss_static.game_dir.resolve() != game_dir.resolve():
+                self._rgss_static = RGSSStatic(game_dir, workspace)
+            self._rgss_static.repack(items, getattr(self, "_manifest", None))
             return
 
         # MV/MZ: deploy replace mode
@@ -192,90 +199,39 @@ class RPGMakerEngine(EngineBase):
             except ImportError:
                 warning("RPG Maker 运行时模块不可用")
 
-    # ---- VX/VXAce support (unchanged) ----
+    def diagnostics_snapshot(self) -> dict:
+        if self._rgss_static is None:
+            return {}
+        return {
+            "route": "rgss_static",
+            "archive": str(self._rgss_static.archive_path or ""),
+            "repack_verification": self._rgss_static.verification,
+        }
+
+    # ---- Static RGSS and XP/mkxp localization ----
 
     def _unpack_vxace(self, game_dir: Path, workspace: Path,
                       rgss3a_files: list[Path], rvdata_files: list[Path]) -> list[TextItem]:
         self._is_vxace = True
-        original_dir = workspace / "original"
-        original_dir.mkdir(parents=True, exist_ok=True)
-
-        if rgss3a_files:
-            self._rgss3a_path = rgss3a_files[0]
-            header_data = self._rgss3a_path.read_bytes()
-            self._rgss3a_key = struct.unpack_from("<I", header_data, 8)[0]
-            info(f"正在解密 RGSS3A: {self._rgss3a_path.name}")
-            extract_rgss3a(self._rgss3a_path, original_dir)
-            data_dir = original_dir / "Data"
-        else:
-            data_dir = original_dir / "Data"
-            data_dir.mkdir(parents=True, exist_ok=True)
-            for f in rvdata_files:
-                shutil.copy2(f, data_dir / f.name)
-
-        items: list[TextItem] = []
-        for rv in sorted(data_dir.glob("*.rvdata2")):
-            data = rv.read_bytes()
-            strings = extract_strings_from_marshal(data)
-            rel_path = str(rv.relative_to(original_dir))
-            unique: list[str] = list(dict.fromkeys(strings))
-            for i, s in enumerate(unique):
-                items.append(TextItem(file=rel_path, key=f"str_{i:04d}", original=s))
-
-        info(f"提取到 {len(items)} 条可翻译文本 (VX/VXAce)")
-        return items
+        self._game_dir = game_dir
+        self._rgss_static = RGSSStatic(game_dir, workspace)
+        return self._rgss_static.unpack()
 
     def _repack_vxace(self, items: list[TextItem], workspace: Path) -> None:
-        original_dir = workspace / "original"
-        file_translations: dict[str, dict[str, str]] = {}
-        for item in items:
-            if item.translated and item.translated != item.original:
-                file_translations.setdefault(item.file, {})[item.original] = item.translated
-
-        total_replaced = 0
-        for rel_path, translations in file_translations.items():
-            target = original_dir / rel_path
-            if not target.exists():
-                continue
-            data = target.read_bytes()
-            result = replace_strings_in_marshal_full(data, translations)
-            total_replaced += len(translations)
-            target.write_bytes(result)
-
-        info(f"VX/VXAce 回填完成: {total_replaced} 条替换")
-
-        if self._rgss3a_path:
-            file_order, file_keys, _ = get_archive_metadata(self._rgss3a_path)
-            pack_rgss3a(original_dir, self._rgss3a_path, base_key=self._rgss3a_key,
-                        file_order=file_order, file_keys=file_keys)
-            info(f"RGSS3A 已更新: {self._rgss3a_path}")
+        self.repack(items, workspace)
 
     def _unpack_xp_mkxp(self, game_dir: Path, workspace: Path,
                         rxdata_files: list[Path]) -> list[TextItem]:
         self._is_xp_mkxp = True
-        original_dir = workspace / "original"
-        original_dir.mkdir(parents=True, exist_ok=True)
+        self._game_dir = game_dir
 
         items = self._extract_po_localization(game_dir)
         if items:
             info(f"提取到 {len(items)} 条 PO 本地化文本 (RPG Maker XP/mkxp)")
             return items
 
-        data_dir = original_dir / "Data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        for f in rxdata_files:
-            shutil.copy2(f, data_dir / f.name)
-
-        for rv in sorted(data_dir.glob("*.rxdata")):
-            data = rv.read_bytes()
-            strings = extract_strings_from_marshal(data)
-            rel_path = str(rv.relative_to(original_dir))
-            unique: list[str] = list(dict.fromkeys(strings))
-            for i, s in enumerate(unique):
-                items.append(TextItem(file=rel_path, key=f"str_{i:04d}", original=s))
-
-        info(f"提取到 {len(items)} 条 RXDATA 文本 (RPG Maker XP/mkxp)")
-        return items
+        self._rgss_static = RGSSStatic(game_dir, workspace)
+        return self._rgss_static.unpack()
 
     def _extract_po_localization(self, game_dir: Path) -> list[TextItem]:
         languages_dir = game_dir / "Languages"
@@ -329,37 +285,37 @@ class RPGMakerEngine(EngineBase):
 
         game_dir = Path(self._game_dir) if hasattr(self, "_game_dir") else None
         if not game_dir:
-            warning("RPG Maker XP/mkxp: 缺少游戏目录，跳过 PO 写入")
-            return
+            raise ValueError("RPG Maker PO repack requires the actual game directory")
 
-        target_po = game_dir / str(po_items[0].meta.get("target_po") or po_items[0].file)
-        target_loc = game_dir / str(po_items[0].meta.get("target_loc") or Path(target_po).with_suffix(".loc"))
-
-        translations = {
-            str(item.meta.get("msgid") or item.key): item.translated
-            for item in po_items
-        }
-        if not target_po.exists():
-            warning(f"RPG Maker XP/mkxp: 未找到目标 PO 文件 {target_po}")
-            return
-        content = target_po.read_text(encoding="utf-8-sig", errors="replace")
-        new_content, changed = _rewrite_po_msgstr(content, translations)
-        target_po.write_text(new_content, encoding="utf-8")
-        info(f"RPG Maker XP/mkxp PO 写入完成: {target_po.name}, {changed} 条")
-
-        if target_loc.exists():
-            loc_translations = {
-                item.original: item.translated
-                for item in po_items
-                if item.original and item.translated and item.translated != item.original
+        catalogs: dict[str, list[TextItem]] = {}
+        for item in po_items:
+            relative = safe_relative_name(str(item.meta.get("target_po") or item.file))
+            catalogs.setdefault(relative, []).append(item)
+        changes: dict[Path, bytes] = {}
+        for relative, catalog_items in catalogs.items():
+            target_po = game_dir / relative
+            translations = {
+                str(item.meta.get("msgid") or item.key): item.translated
+                for item in catalog_items
             }
-            try:
-                target_loc.write_bytes(
-                    replace_any_strings_in_marshal_full(target_loc.read_bytes(), loc_translations)
-                )
-                info(f"RPG Maker XP/mkxp LOC 写入完成: {target_loc.name}, {len(loc_translations)} 条候选")
-            except Exception as e:
-                warning(f"RPG Maker XP/mkxp LOC 写入失败: {e}")
+            content = target_po.read_text(encoding="utf-8-sig")
+            new_content, changed = _rewrite_po_msgstr(content, translations)
+            if changed == 0:
+                raise ValueError(f"RPG Maker PO checkpoint no longer matches: {relative}")
+            changes[target_po] = new_content.encode("utf-8")
+            locs: dict[str, dict[str, str]] = {}
+            for item in catalog_items:
+                loc = safe_relative_name(str(item.meta.get("target_loc") or Path(relative).with_suffix(".loc")))
+                locs.setdefault(loc, {})[item.original] = item.translated
+            for loc, loc_translations in locs.items():
+                target_loc = game_dir / loc
+                if target_loc.is_file():
+                    original = target_loc.read_bytes()
+                    if replace_any_strings_in_marshal_full(original, {}) != original:
+                        raise ValueError(f"Unsupported RPG Maker LOC structure: {loc}")
+                    changes[target_loc] = replace_any_strings_in_marshal_full(original, loc_translations)
+        deploy_changes(game_dir, changes, getattr(self, "_manifest", None))
+        info(f"RPG Maker XP/mkxp PO/LOC 写入完成: {len(changes)} 个文件")
 
     def find_exe(self, path: Path) -> Path | None:
         game_dir = path if path.is_dir() else path.parent

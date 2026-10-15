@@ -427,9 +427,8 @@ def _scan_static(game_dir: Path) -> list[TextItem]:
     for fp in sorted(data_dir.glob("Map*.json")):
         if fp.name == "MapInfos.json":
             continue
-        try:
-            map_data = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
+        map_data = _load_data_json(fp)
+        if not isinstance(map_data, dict):
             continue
         if not map_data or not map_data.get('events'):
             continue

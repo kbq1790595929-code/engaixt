@@ -1,0 +1,961 @@
+{
+  "generated_from": "EngAixt-1.1.15-Windows-x64.zip",
+  "generated_at": "2026-09-18T16:26:49.606Z",
+  "total_entries": 1757,
+  "functional_entries": 236,
+  "excluded_junk": [
+    "_internal/web/app.ico.bak-20260918-231131"
+  ],
+  "excluded_runtime_entries": 1520,
+  "by_category": {
+    "(root)": 5,
+    "_internal/licenses": 3,
+    "_internal/tools": 135,
+    "_internal/assets": 31,
+    "_internal/engines": 1,
+    "_internal/frida": 49,
+    "_internal/web": 12
+  },
+  "files": [
+    {
+      "path": "EngAixt.exe",
+      "size": 21907584
+    },
+    {
+      "path": "_internal/MSVCR100.dll",
+      "size": 829264
+    },
+    {
+      "path": "_internal/_internal/licenses/GARbro-LICENSE.txt",
+      "size": 1098
+    },
+    {
+      "path": "_internal/_internal/licenses/KRKR-THIRD-PARTY-NOTICES.md",
+      "size": 722
+    },
+    {
+      "path": "_internal/_internal/licenses/KirikiriTools-LICENSE.txt",
+      "size": 1090
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/README.md",
+      "size": 919
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/components.json",
+      "size": 4043
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ArcExtra.dll",
+      "size": 66560
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ArcExtra.dll.config",
+      "size": 2794
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ArcFormats.dll",
+      "size": 2422272
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ArcFormats.dll.config",
+      "size": 11408
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ArcLegacy.dll",
+      "size": 680960
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ArcLegacy.dll.config",
+      "size": 2533
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/BCnEncoder.dll",
+      "size": 278016
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/BCnEncoder.xml",
+      "size": 232934
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/CommunityToolkit.HighPerformance.dll",
+      "size": 116512
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/CommunityToolkit.HighPerformance.pdb",
+      "size": 57104
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/CommunityToolkit.HighPerformance.xml",
+      "size": 420844
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Concentus.Oggfile.dll",
+      "size": 49664
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Concentus.dll",
+      "size": 392192
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Concentus.xml",
+      "size": 233499
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GARbro.Console.exe",
+      "size": 9216
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GARbro.Console.exe.config",
+      "size": 2529
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GARbro.GUI.exe",
+      "size": 288768
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GARbro.GUI.exe.config",
+      "size": 6690
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/Formats.dat",
+      "size": 1937004
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/NCFileMap.dat",
+      "size": 9197514
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/NCFileMap.idx",
+      "size": 8111056
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/bonk_ntr_1.lst",
+      "size": 137624
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/gx4_bsz_visual.lst",
+      "size": 19209
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/hibiki_works.dat",
+      "size": 1181126
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/kimiaru.lst",
+      "size": 578017
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/kirikiri_bracon.lst",
+      "size": 9122
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/kirikiri_keikan.lst",
+      "size": 18845
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/kirikiri_rhapsody.lst",
+      "size": 30677
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/littlewitch.lst",
+      "size": 1647796
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/logg_pl.lst",
+      "size": 9835
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/motto_haramase_honoo_no_oppai_isekai_chou_ero_succubus_gakuen.lst",
+      "size": 15789674
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/nekopack.lst",
+      "size": 1133888
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/tanuki.lst",
+      "size": 1023115
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameData/yuyuyu_A.lst",
+      "size": 112005
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameRes.dll",
+      "size": 109568
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/GameRes.dll.config",
+      "size": 3521
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ICSharpCode.SharpZipLib.dll",
+      "size": 253952
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ICSharpCode.SharpZipLib.pdb",
+      "size": 121652
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ICSharpCode.SharpZipLib.xml",
+      "size": 600740
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Image.Convert.exe",
+      "size": 7168
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Image.Convert.exe.config",
+      "size": 2529
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/K4os.Compression.LZ4.dll",
+      "size": 75264
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/K4os.Compression.LZ4.xml",
+      "size": 103938
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Bcl.HashCode.dll",
+      "size": 26920
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Bcl.HashCode.xml",
+      "size": 1732
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Bcl.Numerics.dll",
+      "size": 22800
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Bcl.Numerics.xml",
+      "size": 23730
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Deployment.Compression.Cab.dll",
+      "size": 49152
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Deployment.Compression.dll",
+      "size": 36864
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Win32.Registry.dll",
+      "size": 26496
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.Win32.Registry.xml",
+      "size": 94835
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.Core.dll",
+      "size": 103936
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.Core.xml",
+      "size": 213986
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.ExtendedLinguisticServices.dll",
+      "size": 28160
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.ExtendedLinguisticServices.xml",
+      "size": 63166
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.Sensors.dll",
+      "size": 47616
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.Sensors.xml",
+      "size": 94244
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.Shell.dll",
+      "size": 573952
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.Shell.xml",
+      "size": 1500688
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.ShellExtensions.dll",
+      "size": 36864
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.ShellExtensions.xml",
+      "size": 41919
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Microsoft.WindowsAPICodePack.dll",
+      "size": 6144
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Asio.dll",
+      "size": 34304
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Asio.xml",
+      "size": 48413
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Core.dll",
+      "size": 187904
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Core.xml",
+      "size": 332724
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Midi.dll",
+      "size": 46592
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Midi.xml",
+      "size": 70585
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Wasapi.dll",
+      "size": 179200
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.Wasapi.xml",
+      "size": 506668
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.WinForms.dll",
+      "size": 40960
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.WinForms.xml",
+      "size": 29946
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.WinMM.dll",
+      "size": 57344
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.WinMM.xml",
+      "size": 112754
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.dll",
+      "size": 7680
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NAudio.xml",
+      "size": 4831
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NVorbis.dll",
+      "size": 81408
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/NVorbis.xml",
+      "size": 62779
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Net20.dll",
+      "size": 5120
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Newtonsoft.Json.dll",
+      "size": 721320
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Newtonsoft.Json.xml",
+      "size": 733577
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/SixLabors.ImageSharp.dll",
+      "size": 1729536
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/SixLabors.ImageSharp.xml",
+      "size": 3892564
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Snappier.dll",
+      "size": 47616
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/Snappier.xml",
+      "size": 34726
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Buffers.dll",
+      "size": 23816
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Buffers.xml",
+      "size": 11058
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Data.SQLite.dll",
+      "size": 450232
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Data.SQLite.xml",
+      "size": 1245480
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Memory.dll",
+      "size": 145200
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Memory.xml",
+      "size": 208053
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Numerics.Vectors.dll",
+      "size": 110344
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Numerics.Vectors.xml",
+      "size": 191892
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Runtime.CompilerServices.Unsafe.dll",
+      "size": 19256
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Runtime.CompilerServices.Unsafe.xml",
+      "size": 21820
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Security.AccessControl.dll",
+      "size": 37136
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Security.AccessControl.xml",
+      "size": 19425
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Security.Principal.Windows.dll",
+      "size": 18312
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Security.Principal.Windows.xml",
+      "size": 90968
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Text.Encoding.CodePages.dll",
+      "size": 769800
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Text.Encoding.CodePages.xml",
+      "size": 2077
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Threading.Tasks.Extensions.dll",
+      "size": 27960
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Threading.Tasks.Extensions.xml",
+      "size": 42928
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.ValueTuple.dll",
+      "size": 25232
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Windows.Controls.Input.Toolkit.dll",
+      "size": 109400
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/System.Windows.Controls.Layout.Toolkit.dll",
+      "size": 95064
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/WPFToolkit.dll",
+      "size": 467288
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ZstdSharp.dll",
+      "size": 429056
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ja-JP/ArcFormats.resources.dll",
+      "size": 12288
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ja-JP/GARbro.GUI.resources.dll",
+      "size": 14336
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ja-JP/GameRes.resources.dll",
+      "size": 4608
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ko-KR/ArcFormats.resources.dll",
+      "size": 10752
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ko-KR/GARbro.GUI.resources.dll",
+      "size": 13312
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ko-KR/GameRes.resources.dll",
+      "size": 4096
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ru-RU/ArcFormats.resources.dll",
+      "size": 11776
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ru-RU/GARbro.GUI.resources.dll",
+      "size": 15360
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/ru-RU/GameRes.resources.dll",
+      "size": 4608
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/x64/SQLite.Interop.dll",
+      "size": 2005688
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/x64/libwebp.dll",
+      "size": 325120
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/x86/SQLite.Interop.dll",
+      "size": 1592504
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/x86/libwebp.dll",
+      "size": 276992
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/zh-Hans/ArcFormats.resources.dll",
+      "size": 10240
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/zh-Hans/GARbro.GUI.resources.dll",
+      "size": 12800
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/zh-Hans/GameRes.resources.dll",
+      "size": 4096
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/zh-Hant/ArcFormats.resources.dll",
+      "size": 10240
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/zh-Hant/GARbro.GUI.resources.dll",
+      "size": 12800
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/garbro/zh-Hant/GameRes.resources.dll",
+      "size": 4096
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/kirikiri_tools/Xp3Pack.exe",
+      "size": 9216
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/kirikiri_tools/version.dll",
+      "size": 94208
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/msg_tool/LICENSE-GPL-3.0.txt",
+      "size": 35823
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/msg_tool/SOURCE.txt",
+      "size": 171
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/msg_tool/msg_tool.exe",
+      "size": 34197504
+    },
+    {
+      "path": "_internal/_internal/tools/kirikiri/msg_tool/msg_tool.pdb",
+      "size": 11399168
+    },
+    {
+      "path": "_internal/assets/SOURCE_HAN_SANS_LICENSE.txt",
+      "size": 4559
+    },
+    {
+      "path": "_internal/assets/SourceHanSansCN-Regular.otf",
+      "size": 8429224
+    },
+    {
+      "path": "_internal/assets/XUnity.AutoTranslator-mono-5.6.1.zip",
+      "size": 756430
+    },
+    {
+      "path": "_internal/assets/bepinex_patches/BepInEx.Core.patched.dll",
+      "size": 112128
+    },
+    {
+      "path": "_internal/assets/bepinex_patches/BepInEx.Preloader.5x.patched.dll",
+      "size": 42496
+    },
+    {
+      "path": "_internal/assets/bepinex_patches/BepInEx.Preloader.Core.patched.dll",
+      "size": 41472
+    },
+    {
+      "path": "_internal/assets/bepinex_patches/BepInEx_UnityMono_patched.dll",
+      "size": 49664
+    },
+    {
+      "path": "_internal/assets/bepinex_patches/MonoMod.Utils.5x.patched.dll",
+      "size": 187392
+    },
+    {
+      "path": "_internal/assets/bepinex_plugins/UGUITextOverlayGuard.cs",
+      "size": 25498
+    },
+    {
+      "path": "_internal/assets/bepinex_plugins/UGUITextOverlayGuardLegacy.cs",
+      "size": 10035
+    },
+    {
+      "path": "_internal/assets/bgi_native_runtime/x64/bgi_native_hook.dll",
+      "size": 833536
+    },
+    {
+      "path": "_internal/assets/bgi_native_runtime/x64/bgi_native_launcher.exe",
+      "size": 769024
+    },
+    {
+      "path": "_internal/assets/bgi_native_runtime/x86/bgi_native_hook.dll",
+      "size": 872960
+    },
+    {
+      "path": "_internal/assets/bgi_native_runtime/x86/bgi_native_launcher.exe",
+      "size": 805376
+    },
+    {
+      "path": "_internal/assets/kirikiri_native_runtime/x86/kirikiri_native_hook.dll",
+      "size": 1273344
+    },
+    {
+      "path": "_internal/assets/kirikiri_native_runtime/x86/kirikiri_native_launcher.exe",
+      "size": 805888
+    },
+    {
+      "path": "_internal/assets/source_han_sans_cn_cjk.fontdata",
+      "size": 7721034
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/LLVM-LIBCXX-LICENSE.txt",
+      "size": 17014
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/LLVM-LIBCXXABI-LICENSE.txt",
+      "size": 17017
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/LLVM-LIBUNWIND-LICENSE.txt",
+      "size": 17017
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/LZ4-LICENSE.txt",
+      "size": 1335
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/NLOHMANN-JSON-LICENSE.txt",
+      "size": 1096
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/THIRD_PARTY_NOTICES.txt",
+      "size": 1423
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/UBERWOLF-LICENSE.txt",
+      "size": 1087
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/UberWolfCli.exe",
+      "size": 1826816
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/engaixt_wolf_native.exe",
+      "size": 1580032
+    },
+    {
+      "path": "_internal/assets/wolf_runtime/wolf_text_bridge.exe",
+      "size": 1678336
+    },
+    {
+      "path": "_internal/assets/xunity_fonts/NOTO_SANS_CJK_OFL.txt",
+      "size": 4393
+    },
+    {
+      "path": "_internal/assets/xunity_fonts/NotoSansSC_sdf32_optimized_12k_lz4_2020",
+      "size": 31799587
+    },
+    {
+      "path": "_internal/assets/xunity_fonts/THIRD_PARTY_NOTICES.txt",
+      "size": 516
+    },
+    {
+      "path": "_internal/assets/xunity_plugins/EngAixt.XUnityTmpFontFallback.dll",
+      "size": 8704
+    },
+    {
+      "path": "_internal/engines/assets/rpgmaker_hook.js",
+      "size": 26711
+    },
+    {
+      "path": "_internal/frida/HOOK_TOOLS_README.md",
+      "size": 7257
+    },
+    {
+      "path": "_internal/frida/_frida.pyd",
+      "size": 117987840
+    },
+    {
+      "path": "_internal/frida/bgi_realtime_hook.js",
+      "size": 22926
+    },
+    {
+      "path": "_internal/frida/boot_bepinex.js",
+      "size": 1462
+    },
+    {
+      "path": "_internal/frida/capture_win32.py",
+      "size": 1684
+    },
+    {
+      "path": "_internal/frida/crack_bgi_key.js",
+      "size": 7193
+    },
+    {
+      "path": "_internal/frida/d3d11_gdi_overlay.js",
+      "size": 41926
+    },
+    {
+      "path": "_internal/frida/explore_godot.js",
+      "size": 4303
+    },
+    {
+      "path": "_internal/frida/gamemaker_draw_probe.js",
+      "size": 16619
+    },
+    {
+      "path": "_internal/frida/gamemaker_runtime_patch_menu.js",
+      "size": 2340
+    },
+    {
+      "path": "_internal/frida/gamemaker_string_ctor_probe.js",
+      "size": 4538
+    },
+    {
+      "path": "_internal/frida/generic_overlay.js",
+      "size": 3769
+    },
+    {
+      "path": "_internal/frida/godot_display_hook.js",
+      "size": 30704
+    },
+    {
+      "path": "_internal/frida/hook_font.js",
+      "size": 2646
+    },
+    {
+      "path": "_internal/frida/hook_translate.js",
+      "size": 5950
+    },
+    {
+      "path": "_internal/frida/hook_unity_text.js",
+      "size": 1467
+    },
+    {
+      "path": "_internal/frida/hook_win32_text.js",
+      "size": 3076
+    },
+    {
+      "path": "_internal/frida/hot_reload.js",
+      "size": 776
+    },
+    {
+      "path": "_internal/frida/kirikiri_realtime_hook.js",
+      "size": 25522
+    },
+    {
+      "path": "_internal/frida/kirikiri_text_probe.js",
+      "size": 23199
+    },
+    {
+      "path": "_internal/frida/launch_translate.py",
+      "size": 5012
+    },
+    {
+      "path": "_internal/frida/list_exports.js",
+      "size": 263
+    },
+    {
+      "path": "_internal/frida/list_modules.py",
+      "size": 1038
+    },
+    {
+      "path": "_internal/frida/memory_string_scan.js",
+      "size": 5358
+    },
+    {
+      "path": "_internal/frida/probe_gamemaker_draw.py",
+      "size": 6345
+    },
+    {
+      "path": "_internal/frida/probe_gamemaker_string_ctor.py",
+      "size": 2697
+    },
+    {
+      "path": "_internal/frida/probe_kirikiri_text.py",
+      "size": 9523
+    },
+    {
+      "path": "_internal/frida/probe_runtime_text.py",
+      "size": 7244
+    },
+    {
+      "path": "_internal/frida/probe_runtime_text_v2.py",
+      "size": 12131
+    },
+    {
+      "path": "_internal/frida/realtime_hook.js",
+      "size": 5343
+    },
+    {
+      "path": "_internal/frida/rpgmaker_mkxp_ttf_hook.js",
+      "size": 34630
+    },
+    {
+      "path": "_internal/frida/run_bgi_realtime.py",
+      "size": 9614
+    },
+    {
+      "path": "_internal/frida/run_crack_bgi.py",
+      "size": 3483
+    },
+    {
+      "path": "_internal/frida/run_d3d11_overlay.py",
+      "size": 6433
+    },
+    {
+      "path": "_internal/frida/run_gamemaker_menu_patch.py",
+      "size": 2108
+    },
+    {
+      "path": "_internal/frida/run_godot_display_hook.py",
+      "size": 17678
+    },
+    {
+      "path": "_internal/frida/run_hot_reload.py",
+      "size": 4175
+    },
+    {
+      "path": "_internal/frida/run_kirikiri_realtime.py",
+      "size": 11113
+    },
+    {
+      "path": "_internal/frida/run_memory_scan.py",
+      "size": 5352
+    },
+    {
+      "path": "_internal/frida/run_realtime.py",
+      "size": 5996
+    },
+    {
+      "path": "_internal/frida/run_rpgmaker_mkxp_hook.py",
+      "size": 19528
+    },
+    {
+      "path": "_internal/frida/run_translator.py",
+      "size": 4008
+    },
+    {
+      "path": "_internal/frida/runtime_text_probe.js",
+      "size": 15179
+    },
+    {
+      "path": "_internal/frida/runtime_text_probe_v2.js",
+      "size": 18598
+    },
+    {
+      "path": "_internal/frida/scan_godot.js",
+      "size": 5548
+    },
+    {
+      "path": "_internal/frida/test_load.js",
+      "size": 516
+    },
+    {
+      "path": "_internal/frida/translate_dumps.py",
+      "size": 4342
+    },
+    {
+      "path": "_internal/frida/translate_runtime.js",
+      "size": 3851
+    },
+    {
+      "path": "_internal/frida/watch_gamemaker_strings.py",
+      "size": 6767
+    },
+    {
+      "path": "_internal/frida_probe.js",
+      "size": 10126
+    },
+    {
+      "path": "_internal/web/app.ico",
+      "size": 170637
+    },
+    {
+      "path": "_internal/web/app.js",
+      "size": 82905
+    },
+    {
+      "path": "_internal/web/cloud_model_settings.js",
+      "size": 17809
+    },
+    {
+      "path": "_internal/web/i18n.js",
+      "size": 91558
+    },
+    {
+      "path": "_internal/web/index.html",
+      "size": 67135
+    },
+    {
+      "path": "_internal/web/local_model_settings.css",
+      "size": 365
+    },
+    {
+      "path": "_internal/web/local_model_settings.js",
+      "size": 5051
+    },
+    {
+      "path": "_internal/web/logo.png",
+      "size": 34257
+    },
+    {
+      "path": "_internal/web/preflight_settings.js",
+      "size": 4687
+    },
+    {
+      "path": "_internal/web/style.css",
+      "size": 73543
+    },
+    {
+      "path": "_internal/web/usage_statistics.css",
+      "size": 14082
+    },
+    {
+      "path": "_internal/web/usage_statistics.js",
+      "size": 13095
+    },
+    {
+      "path": "app_version.json",
+      "size": 73
+    }
+  ]
+}

@@ -135,19 +135,41 @@ def run_extract_stage(pipeline, path: Path, engine, file_filter: list[str] | Non
         and not bool(getattr(engine, "_static_external_decrypt_succeeded", False))
     ):
         protected_count = int(getattr(engine, "_protected_script_count", 0) or 0)
-        if protected_count and len(items) < max(200, protected_count * 2):
-            warning(
-                "KiriKiri 静态提取疑似只得到受保护脚本的噪声，已停止翻译；默认不运行 dump，等待静态解密支持"
-            )
+        # 运行时捕获来自游戏运行时真正绘制过的文本，不是受保护脚本的噪声。
+        # 噪声判定与丢弃都必须只针对静态候选：实测某游戏 data.xp3 由 XP3 解密
+        # 插件保护、静态提取 0 条时，已有 24 条运行时捕获，却因为
+        # ``24 < max(200, 169 * 2)`` 被连带清空，最终误报「没有提取出可解析脚本」。
+        runtime_items = [
+            item for item in items
+            if bool((getattr(item, "meta", None) or {}).get("runtime_capture"))
+        ]
+        static_items = [
+            item for item in items
+            if not bool((getattr(item, "meta", None) or {}).get("runtime_capture"))
+        ]
+        if protected_count and len(static_items) < max(200, protected_count * 2):
             pipeline.diagnostics.set("runtime_dump_required", False)
             pipeline.diagnostics.set("static_decrypt_required", True)
             pipeline.diagnostics.set("kirikiri_protected_static_noise", {
                 "items": len(items),
+                "static_items": len(static_items),
+                "runtime_items_kept": len(runtime_items),
                 "protected_script_count": protected_count,
                 "protected_archives": list(getattr(engine, "_protected_archives", [])),
                 "protected_formats": sorted(getattr(engine, "_protected_formats", set())),
             })
-            items = []
+            if runtime_items:
+                warning(
+                    "KiriKiri 静态提取疑似只得到受保护脚本的噪声，已丢弃 "
+                    f"{len(static_items)} 条静态候选，保留运行时捕获文本 "
+                    f"{len(runtime_items)} 条继续翻译"
+                )
+                items = runtime_items
+            else:
+                warning(
+                    "KiriKiri 静态提取疑似只得到受保护脚本的噪声，已停止翻译；默认不运行 dump，等待静态解密支持"
+                )
+                items = []
 
     extracted_count = len(items)
     if items and file_filter:
