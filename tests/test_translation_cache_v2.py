@@ -10,7 +10,7 @@ from translators import cache as cache_module
 from translators import deepseek_runtime_mixin
 from translators.cache import TranslationCache
 from translators.deepseek import DeepSeekTranslator, _Batch, _PendingItem
-from translators.deepseek_batch_json import parse_partial_translation_map
+from translators.deepseek_batch_json import BatchShapeError, parse_partial_translation_map
 
 
 def make_cache(tmp_path: Path) -> TranslationCache:
@@ -355,6 +355,21 @@ def test_structured_batch_parser_accepts_strict_json():
     assert parsed_obj == {1: "你好", 2: "再见"}
     parsed_map = translator._parse_batch_json('{"t":{"1":"你好","2":"再见"}}', [1, 2])
     assert parsed_map == {1: "你好", 2: "再见"}
+
+    parsed_flat_map = translator._parse_batch_json('{"1":"你好","2":"再见"}', [1, 2])
+    assert parsed_flat_map == {1: "你好", 2: "再见"}
+    assert translator._parse_batch_json(
+        '{"type":"json_object","1":"你好","2":"再见"}', [1, 2]
+    ) == {1: "你好", 2: "再见"}
+    assert translator._parse_batch_json(
+        '{"type":"json_object","content":{"1":"你好","2":"再见"}}', [1, 2]
+    ) == {1: "你好", 2: "再见"}
+    assert translator._parse_batch_json(
+        '{"type":"json_object","t":{"1":"你好","2":"再见"}}', [1, 2]
+    ) == {1: "你好", 2: "再见"}
+
+    with pytest.raises(BatchShapeError, match="id set mismatch"):
+        translator._parse_batch_json('{"1":"你好","3":"多余"}', [1, 2])
 
 
 def test_structured_batch_parser_recovers_complete_rows_from_truncated_map():
@@ -1006,6 +1021,28 @@ async def test_structured_batch_translates_and_propagates_duplicates(monkeypatch
     assert cache.stats.contextual_batch_request_count == 0
     assert cache.stats.api_request_count == 1
     assert client.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.anyio
+async def test_recursive_single_item_accepts_flat_numeric_map_in_plain_fallback(monkeypatch, tmp_path):
+    cache = make_cache(tmp_path)
+    monkeypatch.setattr(deepseek_module, "get_cache", lambda: cache)
+    item = TextItem(file="a::e", key="single", original="月が綺麗ですね。", context="message")
+    batch = _Batch(
+        [_PendingItem(item, "cache-key", "message", "")],
+        text_type="message",
+        complex=False,
+    )
+    client = _FakeClient(['{"1":"今晚的月色真美。"}'])
+
+    translated = await DeepSeekTranslator()._translate_structured_batch(
+        batch, client, "ja", "zh-CN", depth=1
+    )
+
+    assert translated == [item]
+    assert item.translated == "今晚的月色真美。"
+    assert "response_format" not in client.chat.completions.calls[0]
+    assert cache.stats.single_fallback_count == 1
 
 
 @pytest.mark.anyio

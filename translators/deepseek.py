@@ -516,7 +516,16 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
             translated_items.append(pending.item)
 
         if failures:
-            if depth < self.MAX_FAILURE_RETRY_DEPTH and len(failures) >= 2:
+            if len(batch.items) == 1:
+                cache.stats.single_fallback_count += 1
+                translated_items.extend(await self._translate_single_items(
+                    failures,
+                    client,
+                    source_lang,
+                    target_lang,
+                    count_validation_fail=False,
+                ))
+            elif depth < self.MAX_FAILURE_RETRY_DEPTH and len(failures) >= 2:
                 # 失败条目重新聚合批处理重试：一次请求覆盖一批，而非逐条单发
                 # （单发有固定 prompt/往返开销，批量失败时数百条会拖慢整体速度）。
                 # depth 上限防止顽固失败条目无限递归。
@@ -965,6 +974,12 @@ class DeepSeekTranslator(DeepSeekRuntimeMixin, TranslatorBase):
                 prompt, placeholders = self.prepare_prompt_for_item(item, source_lang, target_lang)
                 max_tokens = self._single_max_tokens(item, cache)
                 result = await self._call_chat(client, prompt, max_tokens)
+                try:
+                    parsed_single = self._parse_batch_json(result, [1])
+                except (_BatchJsonParseError, _BatchShapeError):
+                    pass
+                else:
+                    result = parsed_single[1]
                 result = restore_placeholders(result, placeholders)
                 source_text = translation_source_for_item(item)
                 safe_result, warns = verify_translation(source_text, result)
