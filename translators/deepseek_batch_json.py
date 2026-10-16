@@ -32,9 +32,23 @@ def parse_batch_json(raw: str, expected_ids: list[int]) -> dict[int, str]:
     if isinstance(data, dict):
         if set(data.keys()) == {"t"} and isinstance(data.get("t"), dict):
             return _parse_translation_map(data["t"], expected_ids)
-        if set(data.keys()) != {"items"}:
-            raise BatchShapeError("response object must only contain t or items")
-        data = data.get("items")
+        if set(data.keys()) == {"items"}:
+            data = data["items"]
+        else:
+            if data.get("type") == "json_object":
+                for field in ("t", "content", "value"):
+                    nested = data.get(field)
+                    if isinstance(nested, dict):
+                        data = nested
+                        break
+                else:
+                    data = {key: value for key, value in data.items() if str(key).isdigit()}
+            # The provider often emits the requested numeric map without the
+            # documented outer `t` wrapper. Accept only a map with string
+            # values; exact ID-set validation below prevents shifted results.
+            if data and all(str(key).isdigit() and isinstance(value, str) for key, value in data.items()):
+                return _parse_translation_map(data, expected_ids)
+            raise BatchShapeError("response object must contain a translation map or items array")
     if not isinstance(data, list):
         raise BatchJsonParseError("response is not array")
 
