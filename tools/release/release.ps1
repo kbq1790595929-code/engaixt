@@ -311,7 +311,6 @@ Say ("   " + $zipItem.Name + "  " + [Math]::Round($zipItem.Length / 1MB, 1) + " 
 
 $dlDir = Join-Path $DeployDir "downloads"
 Assert-ChildPath $dlDir $DeployDir
-if (Test-Path -LiteralPath $dlDir) { Remove-Item -LiteralPath $dlDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
 $githubBase = "https://github.com/$GitHubRepo/releases/download/v$Version"
 $packageUrl = "$githubBase/$pkgName.zip"
