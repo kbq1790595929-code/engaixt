@@ -23,7 +23,7 @@ from utils.logger import info, warning
 class WolfEngine(EngineBase):
     name = "wolf"
     label = "WOLF RPG Editor"
-    support_level = "beta"
+    support_level = "stable"
     supports_extract = True
     supports_repack = True
     detect_priority = 97

@@ -834,11 +834,11 @@ def test_wolf_repack_runs_script_patch_before_validation(tmp_path: Path, monkeyp
     assert "Data/Script/1.csv" in result["outputs"]
 
 
-def test_wolf_capabilities_are_static_beta():
+def test_wolf_capabilities_are_static_stable():
     engine = WolfEngine()
     caps = engine.get_capabilities()
 
-    assert engine.support_level == "beta"
+    assert engine.support_level == "stable"
     assert caps.extract is True
     assert caps.repack is True
     assert caps.static_patch is True

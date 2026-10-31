@@ -53,6 +53,25 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
             detail=f"path={game_path}",
             next_actions=("确认选择的是游戏目录或主 exe，然后重新检测。",),
         )
+    if getattr(engine, "name", "") == "tyrano":
+        from core.pipeline_checkpoint_stage import (
+            _required_checkpoint_contracts,
+            _tyrano_checkpoint_spans_are_bound,
+        )
+
+        available_contracts = {
+            str(value) for value in data.get("translation_contracts", []) if value
+        }
+        if (
+            _required_checkpoint_contracts(game_path, "tyrano") - available_contracts
+            or not _tyrano_checkpoint_spans_are_bound(data)
+        ):
+            return pipeline._fail_stage_code(
+                "patch",
+                "checkpoint_stale_tyrano_spans",
+                detail=f"json_path={json_path}; Tyrano spans are old or unbound",
+                next_actions=("返回正常翻译流程重新提取，再继续翻译或回填。",),
+            )
     pipeline.manifest = GameManifest.for_game(game_path)
     pipeline.manifest.set_engine(engine)
 
@@ -110,6 +129,7 @@ async def do_patch_only(pipeline, game_path: Path, json_path: Path,
             "blocked": 0,
         })
     source_lang = data.get("source_lang", "en")
+    engine._target_lang = data.get("target_lang", "zh-CN")
     engine._source_lang = source_lang  # 传递源语言给 repack 阶段
 
     pipeline._update_progress("回填文本", 70)

@@ -2,7 +2,7 @@
 
 ## Scope
 
-WOLF RPG support is a beta static pipeline. It uses the MIT-licensed
+WOLF RPG support is a stable static pipeline. It uses the MIT-licensed
 [Sinflower/UberWolf](https://github.com/Sinflower/UberWolf) project for archive
 handling and structured WOLF data parsing.
 
@@ -47,7 +47,7 @@ All distributed third-party license texts live in `assets/wolf_runtime/`.
 
 ## Text Coverage
 
-The beta extractor includes:
+The extractor includes:
 
 - Message and choice commands
 - String conditions and `SetString` commands

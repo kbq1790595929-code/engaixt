@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from core.manifest import GameManifest
+from core.pipeline_runtime_stage import _copy_back_safe
 from engines.tyrano import TyranoEngine
 from engines.tyrano.archive import find_packed_tyrano_exe
 from engines.tyrano.script import extract_spans
@@ -77,6 +80,7 @@ f.message = "翻訳してはいけない";
         "帰りたい」",
         "選択してください",
     ]
+    assert spans[0].role == "speaker"
     assert "画像/ボタン.png" not in {span.text for span in spans}
     assert "&tf.maney_buy+'円'" not in {span.text for span in spans}
     assert "翻訳してはいけない" not in {span.text for span in spans}
@@ -115,6 +119,45 @@ def test_tyrano_current_chinese_is_not_sent_for_retranslation(tmp_path):
     assert items == []
 
 
+def test_tyrano_checkpoint_augmentation_adds_new_my_item_fields(tmp_path):
+    source_rel = "__tyrano_embedded__/data/scenario/_Array_.ks"
+    content = (
+        "[iscript]\n"
+        "f.Item = [\n"
+        '  {"name": "媚薬", "memo": "とてもえっちな気分になる"},\n'
+        "];\n"
+        "f.my_Item = [\n"
+        '  {"name": "ブランド服", "my_kazu": 0},\n'
+        "];\n"
+        "[endscript]\n"
+    )
+    workspace = tmp_path / "workspace"
+    source = workspace / "original" / source_rel
+    source.parent.mkdir(parents=True)
+    source.write_text(content, encoding="utf-8")
+    spans = [
+        span for span in extract_spans(content, require_kana=True)
+        if span.role.startswith("variable:Item.")
+    ]
+    items = TyranoEngine._items_for_spans(
+        item_file="resources/app.asar",
+        script_rel="data/scenario/_Array_.ks",
+        source_rel=source_rel,
+        spans=spans,
+        encoding="utf-8",
+        source_kind="current",
+        packed_exe_name="app.asar",
+        packed_archive_name="resources/app.asar",
+    )
+
+    added = TyranoEngine.augment_checkpoint_items(items, workspace)
+
+    assert added == 1
+    assert [(item.meta["role"], item.original) for item in items[-1:]] == [
+        ("variable:my_Item.name", "ブランド服"),
+    ]
+
+
 def test_tyrano_repack_replaces_only_bound_visible_spans(tmp_path):
     game = _make_tyrano_game(tmp_path)
     scenario = game / "data" / "scenario" / "scene001.ks"
@@ -125,6 +168,8 @@ def test_tyrano_repack_replaces_only_bound_visible_spans(tmp_path):
     workspace = tmp_path / "workspace"
     engine = TyranoEngine()
     items = engine.unpack(game, workspace)
+    speaker_item = next(item for item in items if item.meta["role"] == "speaker")
+    assert speaker_item.meta["kind"] == "speaker"
     translations = {
         "クロエ": "克洛伊",
         "「今日は": "「今天",
@@ -135,18 +180,26 @@ def test_tyrano_repack_replaces_only_bound_visible_spans(tmp_path):
 
     engine.repack(items, workspace)
 
-    patched = (workspace / "original" / "data" / "scenario" / "scene001.ks").read_text(
+    original = (workspace / "original" / "data" / "scenario" / "scene001.ks").read_text(
         encoding="utf-8-sig"
     )
+    patched = (workspace / "tyrano_staged" / "entries" / "data" / "scenario" / "scene001.ks").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "「今日は[r]帰りたい」" in original
     assert "#克洛伊" in patched
     assert "「今天[r]想回去」[p]" in patched
     assert 'storage="chara/クロエ.png"' in patched
 
 
-def test_tyrano_embedded_repack_preserves_stub_and_unmodified_entries(tmp_path):
+def test_tyrano_embedded_repack_preserves_stub_and_unmodified_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.manifest.BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr("core.manifest.MANIFEST_DIR", tmp_path / "manifests")
     game, executable, prefix = _make_packed_tyrano_game(tmp_path)
+    before = executable.read_bytes()
     workspace = tmp_path / "workspace"
     engine = TyranoEngine()
+    engine._manifest = GameManifest(game)
     items = engine.unpack(game, workspace)
     for item in items:
         item.translated = {
@@ -155,6 +208,8 @@ def test_tyrano_embedded_repack_preserves_stub_and_unmodified_entries(tmp_path):
         }[item.original]
 
     engine.repack(items, workspace)
+    assert executable.read_bytes() == before
+    _copy_back_safe(SimpleNamespace(root=workspace), game, items, engine)
 
     assert executable.read_bytes().startswith(prefix)
     with ZipFile(executable) as archive:

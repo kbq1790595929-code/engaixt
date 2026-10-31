@@ -225,10 +225,18 @@ VSVersionInfo(
     [System.IO.File]::WriteAllText($viPath, $vi, (New-Object System.Text.UTF8Encoding($false)))
     Say ("   version resource: EngAixt " + $buildVersion)
     Push-Location $SourceRoot
+    $previousErrorAction = $ErrorActionPreference
     try {
+        # PyInstaller writes INFO output to stderr; Windows PowerShell otherwise
+        # promotes it to a terminating error when ErrorActionPreference is Stop.
+        $ErrorActionPreference = "Continue"
         & python -m PyInstaller game-translator.spec --noconfirm
-        if ($LASTEXITCODE -ne 0) { Fail "PyInstaller failed with exit code $LASTEXITCODE" }
-    } finally { Pop-Location }
+        $pyInstallerExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+        Pop-Location
+    }
+    if ($pyInstallerExitCode -ne 0) { Fail "PyInstaller failed with exit code $pyInstallerExitCode" }
 } else {
     Say ""
     Say "== 3/6 build skipped ==" Cyan

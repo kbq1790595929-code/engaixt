@@ -123,6 +123,9 @@ def record_modified_outputs(pipeline, game_path: Path, items: list, engine):
     if engine is not None and not can_repack(engine):
         return
     engine_name = getattr(engine, "name", "") if engine else ""
+    if engine_name == "tyrano":
+        # Tyrano records modified outputs within its transactional deployment.
+        return
     game_dir = game_path if game_path.is_dir() else game_path.parent
     target_dir = game_dir / "game" if engine_name == "renpy" and (game_dir / "game").is_dir() else game_dir
     modified_targets: set[Path] = set()
@@ -837,6 +840,11 @@ def verify_repack_integrity(pipeline, items: list, engine) -> bool:
 
 def backup_game_files(pipeline, game_path: Path, items: list | None = None, engine=None):
     """防线 4: 在回填写入前，对受影响的游戏文件建立安全备份。"""
+    if getattr(engine, "name", "") == "tyrano":
+        # Tyrano stages first and validates backups inside its deployment
+        # transaction; a best-effort backup here could mask a missing or
+        # damaged historical backup by rewriting its manifest hash.
+        return
     from core import pipeline as _pipeline_mod
     game_dir = game_path if game_path.is_dir() else game_path.parent
 
@@ -1096,8 +1104,15 @@ def _copy_back_safe(workspace: Workspace, game_path: Path, items: list | None = 
     engine_name = getattr(engine, "name", "") if engine else ""
     if engine_name in ("godot", "godot_frida", "godot_pck", "xunity_realtime", "rpgmaker", "gamemaker"):
         return  # Runtime/deploy engines don't need file copy-back
-    if engine_name == "tyrano" and bool(getattr(engine, "_packed_archive", False)):
-        return  # Embedded executable was rebuilt directly by TyranoEngine.repack().
+    if engine_name == "tyrano":
+        from engines.tyrano.deploy import deploy_tyrano_outputs
+        game_dir = game_path if game_path.is_dir() else game_path.parent
+        engine._tyrano_deploy_stats = deploy_tyrano_outputs(
+            game_dir, workspace.root, items or [],
+            getattr(engine, "_tyrano_staged_outputs", None),
+            getattr(engine, "_manifest", None),
+        )
+        return
 
     game_dir = game_path if game_path.is_dir() else game_path.parent
 

@@ -23,7 +23,11 @@ def _translation_contract(meta: object) -> str:
     return str(meta.get("translation_contract") or "")
 
 
-def _required_checkpoint_contracts(game_path: Path) -> set[str]:
+def _required_checkpoint_contracts(game_path: Path, engine_name: str = "") -> set[str]:
+    if engine_name == "tyrano":
+        from engines.tyrano.script import TYRANO_SPAN_CONTRACT
+
+        return {TYRANO_SPAN_CONTRACT}
     game_dir = game_path if game_path.is_dir() else game_path.parent
     if (
         (game_dir / "www" / "data" / "CommonEvents.json").exists()
@@ -33,6 +37,47 @@ def _required_checkpoint_contracts(game_path: Path) -> set[str]:
 
         return {RPGMAKER_MESSAGE_CONTRACT}
     return set()
+
+
+def _tyrano_checkpoint_spans_are_bound(data: dict) -> bool:
+    from engines.tyrano.script import TYRANO_SPAN_CONTRACT, decode_ks
+
+    workspace_value = str(data.get("workspace_root") or "").strip()
+    if not workspace_value:
+        return False
+    workspace_root = Path(workspace_value)
+    original_root = workspace_root / "original"
+    if not original_root.is_dir():
+        return False
+
+    contents: dict[Path, str] = {}
+    saw_span = False
+    try:
+        for raw in data.get("items", []):
+            meta = raw.get("meta") if isinstance(raw, dict) else None
+            if (
+                not isinstance(meta, dict)
+                or meta.get("engine") != "tyrano"
+                or meta.get("translation_contract") != TYRANO_SPAN_CONTRACT
+            ):
+                return False
+            saw_span = True
+            source_rel = str(meta.get("source_rel") or "")
+            start = int(meta["span_start"])
+            end = int(meta["span_end"])
+            if not source_rel or start < 0 or end < start:
+                return False
+            source_path = _safe_workspace_child(original_root, source_rel)
+            if source_path is None or not source_path.is_file():
+                return False
+            if source_path not in contents:
+                contents[source_path] = decode_ks(source_path.read_bytes())[0]
+            content = contents[source_path]
+            if end > len(content) or content[start:end] != str(raw.get("original") or ""):
+                return False
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return saw_span
 
 
 def checkpoint_resume_candidate(pipeline, game_path: Path, file_filter: list[str] | None = None) -> Path | None:
@@ -72,12 +117,19 @@ def checkpoint_resume_candidate(pipeline, game_path: Path, file_filter: list[str
     items = data.get("items")
     if not isinstance(items, list) or not items:
         return None
-    required_contracts = _required_checkpoint_contracts(game_path)
+    engine_name = str(getattr(getattr(pipeline, "_current_engine", None), "name", "") or "")
+    required_contracts = _required_checkpoint_contracts(game_path, engine_name)
     available_contracts = {
         str(value) for value in data.get("translation_contracts", []) if value
     }
     if required_contracts - available_contracts:
-        info("RPGMaker 检查点使用旧逐行合同，将重新提取以避免对话错位")
+        if engine_name == "tyrano":
+            info("Tyrano 检查点使用旧 span 合同，将重新提取以避免回填偏移错位")
+        else:
+            info("RPGMaker 检查点使用旧逐行合同，将重新提取以避免对话错位")
+        return None
+    if engine_name == "tyrano" and not _tyrano_checkpoint_spans_are_bound(data):
+        info("Tyrano 检查点源脚本已变化或不可用，将重新提取以刷新回填偏移")
         return None
     source = data.get("source")
     if source:
@@ -208,6 +260,16 @@ async def run_checkpoint_resume_fast_path(
 
     pipeline._checkpoint_path = checkpoint
     pipeline._reuse_checkpoint_workspace_if_available(checkpoint)
+    if getattr(engine, "name", "") == "tyrano" and pipeline.workspace:
+        augment = getattr(engine, "augment_checkpoint_items", None)
+        if callable(augment):
+            added = int(augment(items, pipeline.workspace.root) or 0)
+            if added:
+                checkpoint = pipeline._save_checkpoint_json(
+                    items, path, source_lang, target_lang, checkpoint,
+                )
+                pipeline._checkpoint_path = checkpoint
+                info(f"Tyrano 检查点补入 {added} 条商品显示字段，复用已有译文")
     pipeline.diagnostics.set("checkpoint", str(checkpoint))
     pipeline.diagnostics.set("checkpoint_fast_resume", True)
     info(f"从检查点续翻，跳过重新提取: {checkpoint}")

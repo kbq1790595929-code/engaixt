@@ -407,16 +407,16 @@
         <button type="button" onclick="jumpHelpEngine('help-engine-rpgmaker', this)">RPG Maker</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-renpy', this)">Ren'Py</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-xunity', this)">Unity / XUnity</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-wolf', this)">Wolf RPG</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-unity-arch', this)">Unity @ARCH000</button>
-        <button type="button" onclick="jumpHelpEngine('help-engine-unity-assets', this)">Unity 资源直写</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-godot-pck', this)">Godot PCK</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-godot-frida', this)">Godot 加密 PCK</button>
-        <button type="button" onclick="jumpHelpEngine('help-engine-godot-plain', this)">Godot 明文工程</button>
-        <button type="button" onclick="jumpHelpEngine('help-engine-gamemaker', this)">GameMaker</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-tyrano', this)">TyranoScript</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-kirikiri', this)">吉里吉里</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-unity-assets', this)">Unity 资源直写</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-godot-plain', this)">Godot 明文工程</button>
+        <button type="button" onclick="jumpHelpEngine('help-engine-gamemaker', this)">GameMaker</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-unreal', this)">Unreal Engine</button>
-        <button type="button" onclick="jumpHelpEngine('help-engine-wolf', this)">Wolf RPG</button>
         <button type="button" onclick="jumpHelpEngine('help-engine-generic', this)">通用文本扫描</button>
       </aside>
 
@@ -470,10 +470,11 @@
       <section class="help-block help-wide">
         <div class="help-kicker">引擎说明</div>
         <div class="engine-help-grid">
+          <h4 class="engine-help-group-title">稳定版</h4>
           <section class="engine-help-card" id="help-engine-bgi">
             <div class="engine-help-head">
               <h3>BGI / Ethornell</h3>
-              <span class="help-status beta">Beta</span>
+              <span class="help-status stable">稳定版</span>
             </div>
             <dl class="engine-help-facts">
               <div><dt>适用</dt><dd>常见 BGI、Ethornell、Buriko 游戏，目录里通常有 <code>.arc</code>、<code>BGI.gdb</code>、<code>sysprg.arc</code> 或 <code>system.arc</code>。</dd></div>
@@ -518,6 +519,21 @@
             </dl>
           </section>
 
+          <section class="engine-help-card" id="help-engine-wolf">
+            <div class="engine-help-head">
+              <h3>WOLF RPG Editor</h3>
+              <span class="help-status stable">稳定版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>Wolf RPG Editor 游戏，常见特征是 <code>Data.wolf</code>、<code>Game.dat</code> 等资源。</dd></div>
+              <div><dt>流程</dt><dd>使用 UberWolf 自动识别密钥并解包，结构化提取地图、公共事件和数据库文本，翻译后重新打包。</dd></div>
+              <div><dt>覆盖</dt><dd>支持普通目录、标准 WOLF 归档及 UberWolf 可识别的 Pro 保护，不依赖运行时实时翻译。</dd></div>
+              <div><dt>注意</dt><dd>自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。</dd></div>
+            </dl>
+          </section>
+
+          <h4 class="engine-help-group-title">Beta 版</h4>
+
           <section class="engine-help-card" id="help-engine-unity-arch">
             <div class="engine-help-head">
               <h3>Unity @ARCH000 Lua VN</h3>
@@ -527,18 +543,6 @@
               <div><dt>适用</dt><dd>部分 Unity 视觉小说使用 <code>@ARCH000</code> 一类 Lua 归档保存脚本文本。</dd></div>
               <div><dt>流程</dt><dd>当前 GUI 统一归入 Unity 实时路线，只能点击“实时翻译”，由 XUnity 运行时捕获和替换显示文本。</dd></div>
               <div><dt>注意</dt><dd>静态 Lua 归档回填保留为后续专用能力，不作为普通用户入口；若需要排查覆盖率，可先用“仅提取”。</dd></div>
-            </dl>
-          </section>
-
-          <section class="engine-help-card" id="help-engine-unity-assets">
-            <div class="engine-help-head">
-              <h3>Unity 资源直写</h3>
-              <span class="help-status partial">部分支持</span>
-            </div>
-            <dl class="engine-help-facts">
-              <div><dt>适用</dt><dd>不适合 XUnity 的 Unity 游戏，或需要尝试直接处理 <code>.assets</code> 明文字符串的情况。</dd></div>
-              <div><dt>流程</dt><dd>资源直写保留为内部/实验路径；GUI 普通入口不再让 Unity 走“开始翻译”，避免低覆盖率静态替换误导用户。</dd></div>
-              <div><dt>注意</dt><dd>若目标是“能玩到中文”，优先点击“实时翻译”走 XUnity。只有明确需要研究资源结构时再看提取结果。</dd></div>
             </dl>
           </section>
 
@@ -566,6 +570,47 @@
             </dl>
           </section>
 
+          <section class="engine-help-card" id="help-engine-tyrano">
+            <div class="engine-help-head">
+              <h3>TyranoScript / TyranoBuilder</h3>
+              <span class="help-status beta">Beta 版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>目录里有 <code>data/scenario</code>、<code>package.json</code> 和 <code>tyrano/plugins/kag</code>，或这些资源位于 package.nw 或 NW.js 游戏 exe 内。</dd></div>
+              <div><dt>流程</dt><dd>点击“开始翻译”。工具会结构化提取 <code>.ks</code> 可见文本，使用当前翻译器处理，再精确写回松散脚本、package.nw 或 exe 内嵌 ZIP。</dd></div>
+              <div><dt>安全</dt><dd>脚本标签、资源路径、变量和动态金额表达式不会送去翻译；回填前备份原文件，写入后校验结果。</dd></div>
+              <div><dt>角色名称</dt><dd>角色标识保持原样，未定义显示名的角色可能保留原文。</dd></div>
+              <div><dt>注意</dt><dd>已有多款真实游戏完成整条翻译流程；当前仍为 Beta，兼容性继续验证中。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留 <code>_translation_meta</code> 诊断数据。</dd></div>
+            </dl>
+          </section>
+
+          <section class="engine-help-card" id="help-engine-kirikiri">
+            <div class="engine-help-head">
+              <h3>吉里吉里 / KiriKiri</h3>
+              <span class="help-status beta">Beta 版</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>默认流程</dt><dd>“开始翻译”仅执行静态预检、XP3 解包、脚本提取、AI 翻译和安全回填；失败时保留原文件，不自动切换实时路线。</dd></div>
+              <div><dt>显示方式</dt><dd>静态译文由游戏自身显示，不启动字幕窗口；实时路线的人名和正文分通道处理，已有译文优先读本地映射。</dd></div>
+              <div><dt>启动</dt><dd><code>启动汉化版.bat</code> 只启动静态汉化版；<code>启动实时汉化版.bat</code> 是独立实时入口。游戏库使用静态入口，不启动字幕窗口。</dd></div>
+              <div><dt>静态脚本</dt><dd><code>.ks</code>、<code>.tjs</code>、普通 XP3 / SCN 优先使用内置解析器，失败时按顺序尝试 GARbro、msg-tool 和 VNTextPatch。每个工具都在隔离工作区运行，只有通过产物检查才进入后续阶段。</dd></div>
+            </dl>
+          </section>
+
+          <h4 class="engine-help-group-title">部分支持</h4>
+
+          <section class="engine-help-card" id="help-engine-unity-assets">
+            <div class="engine-help-head">
+              <h3>Unity 资源直写</h3>
+              <span class="help-status partial">部分支持</span>
+            </div>
+            <dl class="engine-help-facts">
+              <div><dt>适用</dt><dd>不适合 XUnity 的 Unity 游戏，或需要尝试直接处理 <code>.assets</code> 明文字符串的情况。</dd></div>
+              <div><dt>流程</dt><dd>资源直写保留为内部/实验路径；GUI 普通入口不再让 Unity 走“开始翻译”，避免低覆盖率静态替换误导用户。</dd></div>
+              <div><dt>注意</dt><dd>若目标是“能玩到中文”，优先点击“实时翻译”走 XUnity。只有明确需要研究资源结构时再看提取结果。</dd></div>
+            </dl>
+          </section>
+
           <section class="engine-help-card" id="help-engine-godot-plain">
             <div class="engine-help-head">
               <h3>Godot 明文工程</h3>
@@ -590,32 +635,6 @@
             </dl>
           </section>
 
-          <section class="engine-help-card" id="help-engine-tyrano">
-            <div class="engine-help-head">
-              <h3>TyranoScript / TyranoBuilder</h3>
-              <span class="help-status experimental">实验性</span>
-            </div>
-            <dl class="engine-help-facts">
-              <div><dt>适用</dt><dd>目录里有 <code>data/scenario</code>、<code>package.json</code> 和 <code>tyrano/plugins/kag</code>，或这些资源被封装在 NW.js 游戏 exe 内。</dd></div>
-              <div><dt>流程</dt><dd>点击“开始翻译”。工具会结构化提取 <code>.ks</code> 可见文本，使用当前翻译器处理，再精确写回松散脚本或 exe 内嵌 ZIP。</dd></div>
-              <div><dt>安全</dt><dd>脚本标签、资源路径、变量和动态金额表达式不会送去翻译；内嵌 exe 会先集中备份，回填后重新打开 ZIP 逐条校验。</dd></div>
-              <div><dt>注意</dt><dd>目前只完成一个真实游戏样本，仍属实验支持。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留 <code>_translation_meta</code> 诊断数据。</dd></div>
-            </dl>
-          </section>
-
-          <section class="engine-help-card" id="help-engine-kirikiri">
-            <div class="engine-help-head">
-              <h3>吉里吉里 / KiriKiri</h3>
-              <span class="help-status beta">Beta 版</span>
-            </div>
-            <dl class="engine-help-facts">
-              <div><dt>默认流程</dt><dd>“开始翻译”仅执行静态预检、XP3 解包、脚本提取、AI 翻译和安全回填；失败时保留原文件，不自动切换实时路线。</dd></div>
-              <div><dt>显示方式</dt><dd>静态译文由游戏自身显示，不启动字幕窗口；实时路线的人名和正文分通道处理，已有译文优先读本地映射。</dd></div>
-              <div><dt>启动</dt><dd><code>启动汉化版.bat</code> 只启动静态汉化版；<code>启动实时汉化版.bat</code> 是独立实时入口。游戏库使用静态入口，不启动字幕窗口。</dd></div>
-              <div><dt>静态脚本</dt><dd><code>.ks</code>、<code>.tjs</code>、普通 XP3 / SCN 优先使用内置解析器，失败时按顺序尝试 GARbro、msg-tool 和 VNTextPatch。每个工具都在隔离工作区运行，只有通过产物检查才进入后续阶段。</dd></div>
-            </dl>
-          </section>
-
           <section class="engine-help-card" id="help-engine-unreal">
             <div class="engine-help-head">
               <h3>Unreal Engine</h3>
@@ -625,19 +644,6 @@
               <div><dt>适用</dt><dd>有 <code>.pak</code>、<code>.utoc</code>、<code>.ucas</code>、<code>Content</code> 或 <code>.uproject</code> 的 Unreal 游戏。</dd></div>
               <div><dt>流程</dt><dd>优先扫描已解包或明文本地化资源；如果配置了 UnrealPak，会尝试解包部分 <code>.pak</code>。</dd></div>
               <div><dt>注意</dt><dd>IoStore 和大多数 <code>.uasset</code> 二进制回填尚未自动化，通常需要 FModel、UnrealPak 或 UE 专用流程配合。</dd></div>
-            </dl>
-          </section>
-
-          <section class="engine-help-card" id="help-engine-wolf">
-            <div class="engine-help-head">
-              <h3>WOLF RPG Editor</h3>
-              <span class="help-status beta">测试版</span>
-            </div>
-            <dl class="engine-help-facts">
-              <div><dt>适用</dt><dd>Wolf RPG Editor 游戏，常见特征是 <code>Data.wolf</code>、<code>Game.dat</code> 等资源。</dd></div>
-              <div><dt>流程</dt><dd>使用 UberWolf 自动识别密钥并解包，结构化提取地图、公共事件和数据库文本，翻译后重新打包。</dd></div>
-              <div><dt>覆盖</dt><dd>支持普通目录、标准 WOLF 归档及 UberWolf 可识别的 Pro 保护，不依赖运行时实时翻译。</dd></div>
-              <div><dt>注意</dt><dd>当前为测试版；自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。</dd></div>
             </dl>
           </section>
 

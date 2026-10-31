@@ -1760,7 +1760,7 @@ function _engineDisplayName(engine) {
     const raw = String(engine || t("未知"));
     const e = raw.toLowerCase();
     if (e === "bgi" || e.includes("bgi") || e.includes("buriko") || e.includes("ethornell")) {
-        return t("BGI / Ethornell（Beta）");
+        return t("BGI / Ethornell（稳定版）");
     }
     if (e === "rpgmaker") return "RPG Maker";
     if (e === "renpy") return "Ren'Py";

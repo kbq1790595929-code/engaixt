@@ -358,7 +358,10 @@ class Pipeline:
                 )
             return True
         except Exception as exc:
-            self._rollback_game_changes(game_path)
+            # Tyrano repack only stages files; restoring all historical manifest
+            # backups here would overwrite the state from before this run.
+            if getattr(engine, "name", "") != "tyrano":
+                self._rollback_game_changes(game_path)
             if getattr(engine, "name", "") == "kirikiri":
                 return self._fail_kirikiri_static_stage(
                     game_path,

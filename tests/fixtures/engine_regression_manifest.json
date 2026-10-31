@@ -21,7 +21,7 @@
   },
   "engines": {
     "bgi": {
-      "status": "beta",
+      "status": "stable",
       "capabilities": {
         "extract": true,
         "repack": true,
@@ -422,7 +422,7 @@
       ]
     },
     "tyrano": {
-      "status": "experimental",
+      "status": "beta",
       "capabilities": {
         "extract": true,
         "repack": true,
@@ -466,7 +466,7 @@
       ],
       "manual_smoke": [
         "Verify one owned NW.js Tyrano game completes DeepSeek translation, embedded ZIP verification, startup, and visible Chinese dialogue.",
-        "Keep support experimental until multiple independent Tyrano samples complete the same smoke test."
+        "Before promoting to stable, verify multiple independent Tyrano games through translation, patch verification, startup, and visible Chinese dialogue."
       ]
     },
     "kirikiri": {
@@ -581,7 +581,7 @@
       ]
     },
     "wolf": {
-      "status": "beta",
+      "status": "stable",
       "capabilities": {
         "extract": true,
         "repack": true,

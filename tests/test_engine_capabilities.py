@@ -43,7 +43,9 @@ def test_all_registered_engines_publish_capabilities():
 
 
 def test_bgi_declares_native_portable_launcher():
-    caps = _engine("bgi").get_capabilities()
+    engine = _engine("bgi")
+    caps = engine.get_capabilities()
+    assert engine.support_summary()["support_level"] == "stable"
     assert caps.extract
     assert caps.repack
     assert caps.static_patch
@@ -74,10 +76,10 @@ def test_godot_frida_declares_runtime_dependency():
     assert not caps.portable_after_patch
 
 
-def test_wolf_declares_beta_uberwolf_static_pipeline():
+def test_wolf_declares_stable_uberwolf_static_pipeline():
     engine = _engine("wolf")
     caps = _engine("wolf").get_capabilities()
-    assert engine.support_level == "beta"
+    assert engine.support_summary()["support_level"] == "stable"
     assert caps.extract
     assert caps.repack
     assert caps.static_patch
@@ -97,6 +99,19 @@ def test_kirikiri_declares_beta_static_patch():
     assert caps.portable_after_patch
     assert caps.creates_launcher
     assert caps.needs_external_tool
+    assert not caps.requires_python
+    assert not caps.requires_frida
+
+
+def test_tyrano_declares_beta_static_patch():
+    engine = _engine("tyrano")
+    caps = engine.get_capabilities()
+    assert engine.support_level == "beta"
+    assert caps.extract
+    assert caps.repack
+    assert caps.static_patch
+    assert not caps.runtime_patch
+    assert caps.portable_after_patch
     assert not caps.requires_python
     assert not caps.requires_frida
 

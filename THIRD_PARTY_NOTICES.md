@@ -22,7 +22,8 @@ conventions. No third-party hook implementation is copied into this repository.
 
 ## Sidecars
 
-The installation package for this application already includes the following tools.:
+The application can download or assemble external tools on demand. These tools
+remain independent programs and are not linked into EngAixt:
 
 - GARbro / GARbro Mod — MIT
 - KirikiriTools — MIT

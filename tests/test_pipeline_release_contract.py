@@ -944,6 +944,84 @@ def test_checkpoint_resume_candidate_requires_current_game_source(tmp_path):
     assert pipe._checkpoint_resume_candidate(game) is None
 
 
+def test_tyrano_checkpoint_fast_resume_requires_current_bound_spans(tmp_path):
+    from engines.tyrano.script import TYRANO_SPAN_CONTRACT, decode_ks, extract_spans
+
+    game = tmp_path / "game"
+    meta_dir = game / "_translation_meta"
+    meta_dir.mkdir(parents=True)
+    source = "#クロエ:smile\nこんにちは[p]\n"
+    source_rel = "__tyrano_embedded__/data/scenario/scene.ks"
+    workspace = tmp_path / "previous_workspace"
+    source_file = workspace / "original" / source_rel
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text(source, encoding="utf-8")
+    source = decode_ks(source_file.read_bytes())[0]
+    spans = extract_spans(source, require_kana=True)
+    checkpoint = meta_dir / "translation_checkpoint.json"
+    checkpoint.write_text(json.dumps({
+        "source": str(game),
+        "workspace_root": str(workspace),
+        "translation_contracts": [TYRANO_SPAN_CONTRACT],
+        "items": [{
+            "file": "resources/app.asar",
+            "original": span.text,
+            "translated": span.text + "译",
+            "meta": {
+                "engine": "tyrano",
+                "translation_contract": TYRANO_SPAN_CONTRACT,
+                "source_rel": source_rel,
+                "span_start": span.start,
+                "span_end": span.end,
+            },
+        } for span in spans],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    pipe = Pipeline()
+    pipe._current_engine = type("TyranoCheckpointEngine", (), {"name": "tyrano"})()
+
+    assert pipe._checkpoint_resume_candidate(game) == checkpoint
+
+    source_file.write_text(source.replace("クロエ", "克洛伊"), encoding="utf-8")
+    assert pipe._checkpoint_resume_candidate(game) is None
+
+    source_file.write_text(source, encoding="utf-8")
+    data = json.loads(checkpoint.read_text(encoding="utf-8"))
+    data["translation_contracts"] = []
+    checkpoint.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert pipe._checkpoint_resume_candidate(game) is None
+
+    data["translation_contracts"] = [TYRANO_SPAN_CONTRACT]
+    data["items"][0]["meta"].pop("translation_contract")
+    checkpoint.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert pipe._checkpoint_resume_candidate(game) is None
+
+
+def test_tyrano_patch_only_rejects_legacy_checkpoint(tmp_path):
+    from core.pipeline_patch_stage import do_patch_only
+
+    game = tmp_path / "game"
+    game.mkdir()
+    checkpoint = tmp_path / "translation_checkpoint.json"
+    checkpoint.write_text(json.dumps({
+        "translation_contracts": [],
+        "items": [{"file": "resources/app.asar", "original": "原文", "translated": "译文"}],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    class TyranoEngine:
+        name = "tyrano"
+
+    pipe = Pipeline()
+    pipe._select_engine = lambda _path: TyranoEngine()
+    failures = []
+    pipe._fail_stage_code = lambda *args, **kwargs: failures.append((args, kwargs)) or False
+
+    result = asyncio.run(do_patch_only(pipe, game, checkpoint, False, None))
+
+    assert result is False
+    assert failures[0][0][:2] == ("patch", "checkpoint_stale_tyrano_spans")
+
+
 def test_workspace_checkpoint_is_used_when_importing_legacy_game_checkpoint(tmp_path, monkeypatch):
     game = tmp_path / "game"
     meta = game / "_translation_meta"

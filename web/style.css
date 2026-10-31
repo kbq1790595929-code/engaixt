@@ -1309,6 +1309,16 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
     grid-template-columns: 1fr;
     gap: 12px;
 }
+.engine-help-group-title {
+    margin: 12px 0 0;
+    padding: 0 2px 7px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-hi);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+.engine-help-group-title:first-child { margin-top: 0; }
 .engine-help-card {
     scroll-margin-top: 8px;
     min-width: 0;

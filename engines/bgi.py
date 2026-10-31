@@ -31,7 +31,7 @@ from utils.logger import info, warning
 class BGIEngine(EngineBase):
     name = "bgi"
     label = "BGI / Ethornell"
-    support_level = "beta"
+    support_level = "stable"
     supports_extract = True
     supports_repack = True
     capabilities = EngineCapabilities(
@@ -50,7 +50,7 @@ class BGIEngine(EngineBase):
     )
     detect_priority = 60
     limitations = [
-        "Beta 版：已支持脚本提取、静态回填与原生免 Python/Frida 启动器。",
+        "已支持脚本提取、静态回填与原生免 Python/Frida 启动器。",
         "已支持 ARC20/PackFile 与 DSC 脚本处理，并带封包尺寸保护。",
         "中文显示使用 sjis_ext.bin 字符隧道和原生 GDI 显示 hook。",
     ]

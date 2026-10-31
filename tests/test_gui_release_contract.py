@@ -36,35 +36,43 @@ def test_help_button_and_engine_help_navigation_exist():
         "help-engine-rpgmaker",
         "help-engine-renpy",
         "help-engine-xunity",
+        "help-engine-wolf",
         "help-engine-unity-arch",
-        "help-engine-unity-assets",
         "help-engine-godot-pck",
         "help-engine-godot-frida",
-        "help-engine-godot-plain",
-        "help-engine-gamemaker",
         "help-engine-tyrano",
         "help-engine-kirikiri",
+        "help-engine-unity-assets",
+        "help-engine-godot-plain",
+        "help-engine-gamemaker",
         "help-engine-unreal",
-        "help-engine-wolf",
         "help-engine-generic",
     ]
+    cards = re.findall(r'<section class="engine-help-card" id="([^"]+)"', html)
+    assert cards == expected_ids
+    groups = re.findall(r'<h4 class="engine-help-group-title">(.*?)</h4>', html)
+    assert groups == ["稳定版", "Beta 版", "部分支持"]
+    levels = re.findall(r'<span class="help-status (stable|beta|partial)"', html)
+    rank = {"stable": 0, "beta": 1, "partial": 2}
+    assert [rank[level] for level in levels] == sorted(rank[level] for level in levels)
     for engine_id in expected_ids:
         assert f"id=\"{engine_id}\"" in html
         assert f"jumpHelpEngine('{engine_id}'" in html
 
 
-def test_tyrano_help_explains_experimental_static_pipeline():
+def test_tyrano_help_explains_beta_static_pipeline():
     html = _text(INDEX)
     i18n = _text(ROOT / "web" / "i18n.js")
 
     card = html.split('id="help-engine-tyrano"', 1)[1].split('id="help-engine-kirikiri"', 1)[0]
     assert "TyranoScript / TyranoBuilder" in card
-    assert "实验性" in card
+    assert 'class="help-status beta"' in card
+    assert "Beta 版" in card
     assert "开始翻译" in card
     assert "exe 内嵌 ZIP" in card
     assert "卸载汉化" in card
-    assert "Only one real game" in i18n
-    assert "実ゲームでの完了例はまだ 1 本のみ" in i18n
+    assert "Multiple real games have completed the full translation pipeline" in i18n
+    assert "複数の実ゲームで翻訳パイプラインが完了" in i18n
 
 
 def test_gui_branding_uses_engaixt_consistently():

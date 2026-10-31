@@ -98,6 +98,11 @@
         "缓存超过上限自动清理": "快取超過上限自動清理",
         "缓存上限（GB，默认 1）": "快取上限（GB，預設 1）",
         "自动清理只删除最旧的全局译文缓存，不会删除游戏目录、汉化文件或每个游戏的元数据。": "自動清理只刪除最舊的全域譯文快取，不會刪除遊戲目錄、漢化檔案或每個遊戲的元資料。",
+        "稳定版": "穩定版",
+        "BGI / Ethornell（稳定版）": "BGI / Ethornell（穩定版）",
+        "自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。": "自訂封存檔和依賴名稱比對的腳本仍需實際遊戲流程驗收。",
+        "角色名称": "角色名稱",
+        "角色标识保持原样，未定义显示名的角色可能保留原文。": "角色識別碼保持原樣，未定義顯示名稱的角色可能保留原文。",
         "正式版": "正式版",
     };
 
@@ -317,12 +322,14 @@
             "从 STRG 字符串表和主程序数据段提取文本；能放回原槽位的译文会安全回填。": "Extracts text from the STRG string table and main program data section; translations that fit the original slots are patched safely.",
             "超长中文可能被跳过，覆盖率不一定完整。像素字体、字号和可读性通常需要单独检查。": "Very long Chinese may be skipped, so coverage may be incomplete. Pixel fonts, size, and readability usually need separate checks.",
             "目录里有": "The folder contains",
-            "，或这些资源被封装在 NW.js 游戏 exe 内。": ", or these resources are packaged inside an NW.js game executable.",
+            "，或这些资源位于 package.nw 或 NW.js 游戏 exe 内。": ", or these resources are in package.nw or an NW.js game executable.",
             "点击“开始翻译”。工具会结构化提取": "Click Start Translation. The tool structurally extracts visible text from",
-            "可见文本，使用当前翻译器处理，再精确写回松散脚本或 exe 内嵌 ZIP。": "files, processes it with the selected translator, then writes exact replacements to loose scripts or an executable's embedded ZIP.",
+            "可见文本，使用当前翻译器处理，再精确写回松散脚本、package.nw 或 exe 内嵌 ZIP。": "files, processes it with the selected translator, then writes exact replacements to loose scripts, package.nw, or an executable's embedded ZIP.",
             "安全": "Safety",
-            "脚本标签、资源路径、变量和动态金额表达式不会送去翻译；内嵌 exe 会先集中备份，回填后重新打开 ZIP 逐条校验。": "Script tags, resource paths, variables, and dynamic price expressions are not translated. Embedded executables are centrally backed up, then every patched ZIP entry is reopened and verified.",
-            "目前只完成一个真实游戏样本，仍属实验支持。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留": "Only one real game has completed this path, so support remains experimental. If startup or text display fails, use Uninstall Translation to restore the original files and keep",
+            "脚本标签、资源路径、变量和动态金额表达式不会送去翻译；回填前备份原文件，写入后校验结果。": "Script tags, resource paths, variables, and dynamic price expressions are not translated. Original files are backed up before patching and verified after writing.",
+            "角色名称": "Character names",
+            "角色标识保持原样，未定义显示名的角色可能保留原文。": "Character identifiers are preserved; characters without a defined display name may remain in the original language.",
+            "已有多款真实游戏完成整条翻译流程；当前仍为 Beta，兼容性继续验证中。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留": "Multiple real games have completed the full translation pipeline. Support remains in beta while compatibility is being verified. If startup or text display fails, use Uninstall Translation to restore the original files and keep",
             "诊断数据。": "diagnostic data.",
             "吉里吉里 / KiriKiri": "KiriKiri",
             "默认流程": "Default Flow",
@@ -354,7 +361,7 @@
             "等资源。": "and related resources.",
             "使用 UberWolf 自动识别密钥并解包，结构化提取地图、公共事件和数据库文本，翻译后重新打包。": "Uses UberWolf to detect keys and unpack archives, extracts maps, common events, and databases structurally, then repacks translated data.",
             "支持普通目录、标准 WOLF 归档及 UberWolf 可识别的 Pro 保护，不依赖运行时实时翻译。": "Supports loose data, standard WOLF archives, and Pro protection recognized by UberWolf without runtime translation.",
-            "当前为测试版；自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。": "Currently beta; custom archives and scripts that depend on name matching still require an in-game smoke test.",
+            "自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。": "Custom archives and scripts that depend on name matching still require an in-game smoke test.",
             "没有匹配到专用引擎，但目录里有": "No dedicated engine matched, but the folder contains",
             "等明文文件。": "and other plain text files.",
             "只扫描明文资源，过滤配置键和明显不是玩家可见文本的内容。": "Only scans plain text resources, filtering config keys and content that is clearly not player-visible.",
@@ -533,7 +540,7 @@
             "未关联引擎": "Unassociated engine",
             "实时翻译会话": "Realtime translation session",
             "更新于": "Updated",
-            "BGI / Ethornell（Beta）": "BGI / Ethornell (Beta)"
+            "BGI / Ethornell（稳定版）": "BGI / Ethornell (Stable)"
         },
         ja: {
             "游戏翻译工具": "ゲーム翻訳ツール",
@@ -720,12 +727,14 @@
             "从 STRG 字符串表和主程序数据段提取文本；能放回原槽位的译文会安全回填。": "STRG 文字列表とメインプログラムのデータ領域からテキストを抽出し、元スロットに収まる訳文だけ安全に書き戻します。",
             "超长中文可能被跳过，覆盖率不一定完整。像素字体、字号和可读性通常需要单独检查。": "非常に長い中国語はスキップされる場合があり、カバー率は完全とは限りません。ピクセルフォント、字号、可読性は別途確認が必要です。",
             "目录里有": "フォルダーに",
-            "，或这些资源被封装在 NW.js 游戏 exe 内。": "があるか、これらのリソースが NW.js ゲーム exe 内に格納されています。",
+            "，或这些资源位于 package.nw 或 NW.js 游戏 exe 内。": "があるか、これらのリソースが package.nw または NW.js ゲーム exe 内に格納されています。",
             "点击“开始翻译”。工具会结构化提取": "「翻訳開始」をクリックします。ツールは",
-            "可见文本，使用当前翻译器处理，再精确写回松散脚本或 exe 内嵌 ZIP。": "の表示テキストを構造化抽出し、現在の翻訳エンジンで処理して、展開済みスクリプトまたは exe 内蔵 ZIP へ正確に書き戻します。",
+            "可见文本，使用当前翻译器处理，再精确写回松散脚本、package.nw 或 exe 内嵌 ZIP。": "の表示テキストを構造化抽出し、現在の翻訳エンジンで処理して、展開済みスクリプト、package.nw、または exe 内蔵 ZIP へ正確に書き戻します。",
             "安全": "安全性",
-            "脚本标签、资源路径、变量和动态金额表达式不会送去翻译；内嵌 exe 会先集中备份，回填后重新打开 ZIP 逐条校验。": "スクリプトタグ、リソースパス、変数、動的な金額式は翻訳しません。内蔵 exe は先に集中バックアップし、書き戻し後に ZIP を再度開いて各項目を検証します。",
-            "目前只完成一个真实游戏样本，仍属实验支持。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留": "実ゲームでの完了例はまだ 1 本のみのため、実験的対応です。起動や表示に問題がある場合は、先に「翻訳をアンインストール」で元ファイルを復元し、",
+            "脚本标签、资源路径、变量和动态金额表达式不会送去翻译；回填前备份原文件，写入后校验结果。": "スクリプトタグ、リソースパス、変数、動的な金額式は翻訳しません。書き戻し前に元ファイルをバックアップし、書き込み後に結果を検証します。",
+            "角色名称": "キャラクター名",
+            "角色标识保持原样，未定义显示名的角色可能保留原文。": "キャラクター識別子は保持し、表示名が未定義の場合は原文が残ることがあります。",
+            "已有多款真实游戏完成整条翻译流程；当前仍为 Beta，兼容性继续验证中。若游戏启动或文本显示异常，请先“卸载汉化”恢复原文件，并保留": "複数の実ゲームで翻訳パイプラインが完了しています。現在は Beta 版で、互換性の検証を続けています。起動や表示に問題がある場合は、先に「翻訳をアンインストール」で元ファイルを復元し、",
             "诊断数据。": "の診断データを残してください。",
             "吉里吉里 / KiriKiri": "吉里吉里 / KiriKiri",
             "默认流程": "既定フロー",
@@ -757,7 +766,7 @@
             "等资源。": "などのリソース。",
             "使用 UberWolf 自动识别密钥并解包，结构化提取地图、公共事件和数据库文本，翻译后重新打包。": "UberWolf で鍵を自動判定して展開し、マップ・コモンイベント・データベースを構造化抽出して翻訳後に再梱包します。",
             "支持普通目录、标准 WOLF 归档及 UberWolf 可识别的 Pro 保护，不依赖运行时实时翻译。": "展開済みデータ、標準 WOLF アーカイブ、UberWolf が認識できる Pro 保護に対応し、実行時翻訳には依存しません。",
-            "当前为测试版；自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。": "現在はベータ版です。独自アーカイブや名前照合に依存するスクリプトは実ゲームでの確認が必要です。",
+            "自定义归档和依赖名称匹配的脚本仍需实际游戏流程验收。": "独自アーカイブや名前照合に依存するスクリプトは実ゲームでの確認が必要です。",
             "没有匹配到专用引擎，但目录里有": "専用エンジンに一致しませんが、フォルダー内に",
             "等明文文件。": "などの平文ファイルがあります。",
             "只扫描明文资源，过滤配置键和明显不是玩家可见文本的内容。": "平文リソースのみをスキャンし、設定キーや明らかにプレイヤー向けでない内容を除外します。",
@@ -913,7 +922,7 @@
             "未关联引擎": "関連付けられていないエンジン",
             "实时翻译会话": "リアルタイム翻訳セッション",
             "更新于": "更新",
-            "BGI / Ethornell（Beta）": "BGI / Ethornell（Beta）"
+            "BGI / Ethornell（稳定版）": "BGI / Ethornell（安定版）"
         }
     };
 
