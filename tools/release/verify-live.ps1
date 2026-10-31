@@ -15,6 +15,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 function Say([string]$T, [string]$C = "Gray") { Write-Host $T -ForegroundColor $C }
+function Invoke-Download([string]$Url, [string]$Destination) {
+    $uri = [Uri]$Url
+    $curlArgs = @("-fsSL", "--connect-timeout", "20", "--max-time", "900", "--retry", "3", "--retry-all-errors", "--retry-delay", "2")
+    if ($uri.IsLoopback) { $curlArgs += @("--noproxy", "*") }
+    $curlArgs += @("-o", $Destination, $Url)
+    & $curl @curlArgs
+    return $LASTEXITCODE
+}
 if ([string]::IsNullOrWhiteSpace($DeployDir)) {
     $DeployDir = (Resolve-Path (Join-Path $PSScriptRoot "..\..\site")).Path
 }
@@ -25,8 +33,9 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
     Say "== live feed ==" Cyan
     $feedPath = Join-Path $tmp "latest.json"
-    & $curl -fsSL --connect-timeout 20 --max-time 900 --noproxy "*" -o $feedPath "$Site/updates/latest.json"
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $feedPath) -or (Get-Item $feedPath).Length -eq 0) { Say "FAILED: cannot fetch $Site/updates/latest.json" Red; exit 1 }
+    $feedUrl = "$Site/updates/latest.json"
+    $downloadExitCode = Invoke-Download $feedUrl $feedPath
+    if ($downloadExitCode -ne 0 -or -not (Test-Path $feedPath) -or (Get-Item $feedPath).Length -eq 0) { Say "FAILED: cannot fetch $feedUrl" Red; exit 1 }
     $feed = Get-Content $feedPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Say ("   version : " + $feed.version)
     Say ("   size    : " + $feed.size)
@@ -35,8 +44,8 @@ try {
     Say ("   notes   : " + ($feed.notes -join "; "))
 
     $manifestPath = Join-Path $tmp "manifest.json"
-    & $curl -fsSL --connect-timeout 20 --max-time 900 --noproxy "*" -o $manifestPath $feed.package_manifest_url
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $manifestPath) -or (Get-Item $manifestPath).Length -eq 0) {
+    $downloadExitCode = Invoke-Download ([string]$feed.package_manifest_url) $manifestPath
+    if ($downloadExitCode -ne 0 -or -not (Test-Path $manifestPath) -or (Get-Item $manifestPath).Length -eq 0) {
         Say "FAILED: cannot fetch package manifest $($feed.package_manifest_url)" Red
         exit 1
     }
@@ -66,8 +75,8 @@ try {
         if (-not ([Uri]$partUrl).IsAbsoluteUri) {
             $partUrl = "$Site/$partUrl"
         }
-        & $curl -fsSL --connect-timeout 20 --max-time 900 --noproxy "*" -o $out $partUrl
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out)) {
+        $downloadExitCode = Invoke-Download $partUrl $out
+        if ($downloadExitCode -ne 0 -or -not (Test-Path $out)) {
             Say ("   BAD   " + $name + "  download failed") Red
             $bad++
             continue
