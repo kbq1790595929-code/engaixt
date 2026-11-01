@@ -10,7 +10,7 @@ from engines.base import TextItem
 from translators.cache import get_cache
 from translators.deepseek import DeepSeekTranslator, _Batch
 from translators.deepseek_batch_json import BatchJsonParseError, BatchShapeError
-from translators.hy_mt2_component import MODEL_NAME
+from translators.hy_mt2_component import MODEL_NAME, selected_model_id
 from translators.hy_mt2_models import resolve_model_name
 from translators.hy_mt2_quality import (
     finalize_local_translations,
@@ -34,7 +34,7 @@ from core.realtime_translation_guard import realtime_translation_issue
 
 class HyMt2Translator(DeepSeekTranslator):
     name = "hy_mt2"
-    label = "腾讯 Hy-MT2（离线）"
+    label = "本地 GGUF 模型（离线）"
     MODEL = MODEL_NAME
     MODEL_CONFIG_FIELD = "hy_mt2_model"
     PROMPT_VERSION = "hy_mt2_game_batch_v3"
@@ -55,6 +55,17 @@ class HyMt2Translator(DeepSeekTranslator):
         self._speed_lock = threading.Lock()
 
     def _model(self, config=None) -> str:
+        if config is None:
+            return selected_model_id()
+        try:
+            custom = str(getattr(config, "hy_mt2_custom_model_path", "") or "").strip()
+            if custom:
+                from pathlib import Path
+                path = Path(custom).expanduser()
+                if path.is_file() and path.suffix.casefold() == ".gguf":
+                    return "custom:" + str(path.resolve())
+        except OSError:
+            pass
         config = config or get_config()
         return resolve_model_name(getattr(config, self.MODEL_CONFIG_FIELD, ""))
 
@@ -107,7 +118,7 @@ class HyMt2Translator(DeepSeekTranslator):
                     text_type="message",
                 )
                 if removed:
-                    info(f"Hy-MT2 realtime invalid cache removed: {removed}")
+                    info(f"本地 GGUF 实时翻译已清理无效缓存: {removed}")
 
         protected, _placeholders = protect_placeholders(source)
         direct_prompt = (
@@ -122,7 +133,7 @@ class HyMt2Translator(DeepSeekTranslator):
         if not self._should_use_realtime_context(source):
             realtime_context = []
         if realtime_context:
-            info(f"Hy-MT2 realtime context pairs={len(realtime_context)}")
+            info(f"本地 GGUF 实时上下文对数={len(realtime_context)}")
         messages = self._build_realtime_messages(protected, realtime_context, speaker)
         max_tokens = max(64, min(512, len(source) * 4 + 32))
         completion, recorded_request = await self._complete_realtime(
@@ -133,7 +144,7 @@ class HyMt2Translator(DeepSeekTranslator):
             item, completion.content, source_lang, target_lang, realtime_context
         )
         if not candidate and realtime_context:
-            info("Hy-MT2 realtime context output invalid; retrying without context")
+            info("本地 GGUF 实时上下文输出无效，改用直接提示词重试")
             completion = await asyncio.to_thread(self._runtime.complete, direct_prompt, max_tokens)
             self._record_realtime_completion(cache, direct_prompt, completion)
             candidate = self._validate_realtime_completion(
@@ -249,7 +260,7 @@ class HyMt2Translator(DeepSeekTranslator):
         for entry in context:
             messages.append({"role": "user", "content": entry["source"]})
             messages.append({"role": "assistant", "content": entry["translated"]})
-        # Hy-MT2 1.8B tends to echo explicit "Speaker:" metadata into the
+        # Small local models can echo explicit "Speaker:" metadata into the
         # translation. Keep it in the rolling state, but do not put it in the
         # text-bearing message until the model can consume it reliably.
         _ = speaker
@@ -320,7 +331,7 @@ class HyMt2Translator(DeepSeekTranslator):
             on_progress(completed, total)
         if not pending:
             self._finalize(items, source_lang, target_lang)
-            info(f"Hy-MT2：全部 {len(items)} 条已翻译或命中缓存")
+            info(f"本地 GGUF：全部 {len(items)} 条已翻译或命中缓存")
             return items
 
         batches = self._make_batches(pending, cache, source_lang, target_lang)
@@ -333,7 +344,7 @@ class HyMt2Translator(DeepSeekTranslator):
         )
         parallelism = max(1, min(3, int(getattr(self._runtime, "parallelism", 1) or 1)))
         info(
-            "Hy-MT2 本地调度："
+            "本地 GGUF 调度："
             f"{parallelism} 路并发，服务端请求槽位与翻译批次同步"
         )
         # Start all slots immediately. Runtime startup is protected by its
@@ -353,13 +364,13 @@ class HyMt2Translator(DeepSeekTranslator):
             if on_progress:
                 on_progress(min(completed, total), total)
             if position == 0:
-                info(f"Hy-MT2 首批翻译完成，后端={self._runtime.active_backend}")
+                info(f"本地 GGUF 首批翻译完成，后端={self._runtime.active_backend}")
             position += len(window)
 
         self._propagate_by_cache_key(items, pending, source_lang, target_lang)
         self._finalize(items, source_lang, target_lang)
         self._log_speed(final=True)
-        info(f"Hy-MT2 翻译完成: {len(batches)} 批，耗时 {time.perf_counter() - started:.1f}s")
+        info(f"本地 GGUF 翻译完成: {len(batches)} 批，耗时 {time.perf_counter() - started:.1f}s")
         return items
 
     def _make_batches(
@@ -373,7 +384,7 @@ class HyMt2Translator(DeepSeekTranslator):
     ) -> list:
         """本地模型按条数上限切批，避免大批次超出上下文被截断。
 
-        DeepSeek 的 token 预算分批适合云端 API，但 Hy-MT2 本地运行时上下文
+        DeepSeek 的 token 预算分批适合云端 API，但本地 GGUF 运行时上下文
         有限（hy_mt2_context_size，默认 4096）。几百条一批时提示词+输出
         会超出上下文，llama.cpp 截断提示词后模型输出无法解析（JSON 解析
         失败→反复拆批重试全部失败）。这里在 token 预算基础上再按
@@ -432,7 +443,7 @@ class HyMt2Translator(DeepSeekTranslator):
             )
         if structure_fixed or speaker_fixed:
             info(
-                "Hy-MT2 确定性后处理: "
+                "本地 GGUF 确定性后处理: "
                 f"结构修复 {structure_fixed} 条，译名统一 {speaker_fixed} 条/"
                 f"{inconsistent_groups} 组，缓存更新 {stored_count} 条"
             )
@@ -510,7 +521,7 @@ class HyMt2Translator(DeepSeekTranslator):
                     target_lang,
                 )
                 warning(
-                    f"Hy-MT2 本地 JSON 不完整，已安全回收 {len(partial)}/{len(batch.items)} 条，"
+                    f"本地 GGUF JSON 不完整，已安全回收 {len(partial)}/{len(batch.items)} 条，"
                     f"只重试剩余 {len(invalid)} 条"
                 )
                 if invalid:
@@ -537,7 +548,7 @@ class HyMt2Translator(DeepSeekTranslator):
                         depth=depth + 1,
                     )
                 return
-            warning(f"Hy-MT2 批量 JSON 解析失败: {exc}")
+            warning(f"本地 GGUF 批量 JSON 解析失败: {exc}")
             for pending in batch.items:
                 pending.item.translated = pending.item.original
             return
@@ -655,12 +666,12 @@ class HyMt2Translator(DeepSeekTranslator):
         if final:
             self._emit_speed(instant=instant, final=True)
             info(
-                f"Hy-MT2 平均速度: {average:.1f} tokens/s，"
+                f"本地 GGUF 平均速度: {average:.1f} tokens/s，"
                 f"累计生成 {self._speed_generated_tokens} tokens"
             )
             return
         info(
-            f"Hy-MT2 实时速度: {float(instant or 0.0):.1f} tokens/s，"
+            f"本地 GGUF 实时速度: {float(instant or 0.0):.1f} tokens/s，"
             f"累计平均 {average:.1f} tokens/s，"
             f"已生成 {self._speed_generated_tokens} tokens"
         )
@@ -750,7 +761,7 @@ class HyMt2Translator(DeepSeekTranslator):
         if actual_controls != expected_controls:
             get_cache().stats.local_control_fail_count += 1
             warning(
-                f"Hy-MT2 本地译文控制符不完整或顺序改变，拒绝写入缓存："
+                f"本地 GGUF 译文控制符不完整或顺序改变，拒绝写入缓存："
                 f"期望 {len(expected_controls)} 个，实际 {len(actual_controls)} 个"
             )
             return None
@@ -763,7 +774,7 @@ class HyMt2Translator(DeepSeekTranslator):
         )
         if issue:
             get_cache().stats.local_quality_fail_count += 1
-            warning(f"Hy-MT2 本地译文质量门禁：{issue}，拒绝写入缓存")
+            warning(f"本地 GGUF 译文质量门禁：{issue}，拒绝写入缓存")
             return None
         return candidate
 

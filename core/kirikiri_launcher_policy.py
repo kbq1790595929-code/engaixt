@@ -11,6 +11,10 @@ from pathlib import Path
 
 KIRIKIRI_STATIC_LAUNCHER_NAME = "启动汉化版.bat"
 KIRIKIRI_REALTIME_LAUNCHER_NAME = "启动实时汉化版.bat"
+# Stable portable entry point for protected XP3 games.  Keep the batch name
+# for backwards compatibility, but prefer the self-contained executable when
+# both are present.
+KIRIKIRI_STANDALONE_LAUNCHER_NAME = "启动汉化版.exe"
 
 _RUNTIME_MARKERS = (
     "core.translation_overlay_window",
@@ -53,6 +57,10 @@ def kirikiri_launcher_route(launcher: Path) -> str:
 
 
 def find_kirikiri_static_launcher(game_dir: Path) -> Path | None:
+    standalone = Path(game_dir) / KIRIKIRI_STANDALONE_LAUNCHER_NAME
+    target = Path(game_dir) / "_translation_meta" / "kirikiri_launcher_target.txt"
+    if standalone.is_file() and target.is_file():
+        return standalone
     launcher = Path(game_dir) / KIRIKIRI_STATIC_LAUNCHER_NAME
     if launcher.is_file() and kirikiri_launcher_route(launcher) == "static":
         return launcher

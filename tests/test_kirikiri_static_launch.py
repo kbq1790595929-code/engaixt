@@ -1,9 +1,117 @@
 from types import SimpleNamespace
 
+import base64
+import json
+import re
+
 import pytest
 
 from core import pipeline_runtime_stage as stage
 from core.launcher import _write_native_kirikiri_launcher, create_kirikiri_static_launcher
+
+
+def _ps_payload(launcher) -> str:
+    content = launcher.read_text(encoding="utf-8-sig")
+    match = re.search(r"-EncodedCommand\s+(\S+)", content)
+    assert match is not None
+    return base64.b64decode(match.group(1)).decode("utf-16le")
+
+
+def test_protected_archive_static_launcher_uses_native_embed_hook(tmp_path, monkeypatch):
+    """自定义签名/加密索引的封包不认 patch.xp3，静态启动器必须走 native 内嵌。"""
+    exe = tmp_path / "Game.exe"
+    exe.write_bytes(b"MZ")
+    meta = tmp_path / "_translation_meta"
+    meta.mkdir()
+    (meta / "extract_diagnostics.json").write_text(json.dumps({
+        "protected_archives": ["data.xp3"],
+        "index_anomaly": "unknown_chunk",
+        "static_external_extractor": "msg_tool",
+    }), encoding="utf-8")
+    (meta / "translation_checkpoint.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+    native = meta / "kirikiri_native_launcher.exe"
+    native.write_bytes(b"MZ")
+    monkeypatch.setattr("core.launcher._prepare_native_kirikiri_runtime", lambda *a, **k: native)
+    monkeypatch.setattr("core.launcher._prepare_kirikiri_standalone_launcher", lambda *a, **k: None)
+
+    launcher = create_kirikiri_static_launcher(exe, SimpleNamespace(name="kirikiri"))
+
+    assert launcher is not None
+    payload = _ps_payload(launcher)
+    assert "kirikiri_native_launcher.exe" in payload
+    assert "KIRIKIRI_NATIVE_HOOK_PROFILE" in payload
+    assert "KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE" in payload
+    assert "KIRIKIRI_CAPTURE_HOOKS" in payload
+    assert "KIRIKIRI_EXPERIMENTAL_TEXT_HOOKS" in payload
+    assert "'display'" in payload
+    assert "Game.exe" in payload
+
+
+def test_protected_archive_embed_launcher_uses_state_checkpoint(tmp_path, monkeypatch):
+    """工作区检查点缺失时，应用状态目录里的检查点也必须能驱动内嵌启动器。"""
+    exe = tmp_path / "Game.exe"
+    exe.write_bytes(b"MZ")
+    meta = tmp_path / "_translation_meta"
+    meta.mkdir()
+    (meta / "extract_diagnostics.json").write_text(json.dumps({
+        "protected_archives": ["data.xp3"],
+        "index_anomaly": "unknown_chunk",
+        "static_external_extractor": "msg_tool",
+    }), encoding="utf-8")
+    state_checkpoint = tmp_path / "state" / "translation_checkpoint.json"
+    state_checkpoint.parent.mkdir()
+    state_checkpoint.write_text(json.dumps({"items": []}), encoding="utf-8")
+    monkeypatch.setattr("core.checkpoint_store.persistent_checkpoint_path", lambda *a, **k: state_checkpoint)
+    native = meta / "kirikiri_native_launcher.exe"
+    native.write_bytes(b"MZ")
+    monkeypatch.setattr("core.launcher._prepare_native_kirikiri_runtime", lambda *a, **k: native)
+    monkeypatch.setattr("core.launcher._prepare_kirikiri_standalone_launcher", lambda *a, **k: None)
+
+    launcher = create_kirikiri_static_launcher(exe, SimpleNamespace(name="kirikiri"))
+
+    assert launcher is not None
+    payload = _ps_payload(launcher)
+    assert "KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE" in payload
+    assert "kirikiri_native_launcher.exe" in payload
+
+
+def test_protected_archive_prefers_standalone_exe_and_removes_batch(tmp_path, monkeypatch):
+    """受保护封包只暴露一个入口：独立 EXE，旧批处理要被清掉。"""
+    exe = tmp_path / "Game.exe"
+    exe.write_bytes(b"MZ")
+    meta = tmp_path / "_translation_meta"
+    meta.mkdir()
+    (meta / "extract_diagnostics.json").write_text(json.dumps({
+        "protected_archives": ["data.xp3"],
+        "index_anomaly": "unknown_chunk",
+        "static_external_extractor": "msg_tool",
+    }), encoding="utf-8")
+    (meta / "translation_checkpoint.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+    native = meta / "kirikiri_native_launcher.exe"
+    native.write_bytes(b"MZ")
+    standalone = tmp_path / "启动汉化版.exe"
+    standalone.write_bytes(b"MZ")
+    legacy_batch = tmp_path / "启动汉化版.bat"
+    legacy_batch.write_text("old entry", encoding="ascii")
+    monkeypatch.setattr("core.launcher._prepare_native_kirikiri_runtime", lambda *a, **k: native)
+    monkeypatch.setattr("core.launcher._prepare_kirikiri_standalone_launcher", lambda *a, **k: standalone)
+
+    launcher = create_kirikiri_static_launcher(exe, SimpleNamespace(name="kirikiri"))
+
+    assert launcher == standalone
+    assert not legacy_batch.exists()
+
+
+def test_plain_archive_static_launcher_still_starts_game_directly(tmp_path):
+    exe = tmp_path / "Game.exe"
+    exe.write_bytes(b"MZ")
+
+    launcher = create_kirikiri_static_launcher(exe, SimpleNamespace(name="kirikiri"))
+
+    assert launcher is not None
+    payload = _ps_payload(launcher)
+    assert "$psi.FileName = $Exe" in payload
+    assert "kirikiri_native_launcher.exe" not in payload
 
 
 @pytest.mark.parametrize("injector", [None, "", "frida", "xunity"])

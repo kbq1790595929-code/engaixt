@@ -17,6 +17,7 @@ from core.exe_selector import find_main_exe
 from core.kirikiri_launcher_policy import (
     KIRIKIRI_REALTIME_LAUNCHER_NAME,
     KIRIKIRI_STATIC_LAUNCHER_NAME,
+    KIRIKIRI_STANDALONE_LAUNCHER_NAME,
     preserve_legacy_kirikiri_realtime_launcher,
 )
 from core.path_resolver import resolve_game_path
@@ -337,15 +338,114 @@ def create_kirikiri_native_launcher(game_path: Path, engine: object | None = Non
     return launcher
 
 
+def _kirikiri_embed_checkpoint(game_dir: Path) -> Path | None:
+    """Locate the translation checkpoint that should feed the embed map.
+
+    The workspace copy in ``_translation_meta`` is preferred, but recent runs
+    keep the authoritative copy in the application state directory. Both are
+    valid sources for the display map.
+    """
+    meta_dir = Path(game_dir) / "_translation_meta"
+    local = meta_dir / "translation_checkpoint.json"
+    if local.is_file():
+        return local
+    try:
+        from core.checkpoint_store import persistent_checkpoint_path
+
+        candidate = persistent_checkpoint_path(game_dir)
+        if Path(candidate).is_file():
+            return Path(candidate)
+    except Exception:
+        pass
+    return None
+
+
+def _kirikiri_archive_needs_embed_launcher(game_dir: Path) -> bool:
+    """Return whether a plain root ``patch.xp3`` cannot be honoured.
+
+    Some KiriKiri games ship a signed/encrypted ``data.xp3`` with a custom
+    index chunk. Those engines parse the archive themselves and never consult
+    an overlay ``patch.xp3``, so static translations must be delivered through
+    the native display hook (the same map the realtime route uses).
+    """
+    meta_dir = Path(game_dir) / "_translation_meta"
+    try:
+        data = json.loads((meta_dir / "extract_diagnostics.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, TypeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    protected = data.get("protected_archives") or []
+    if not protected:
+        return False
+    index_anomaly = str(data.get("index_anomaly") or "").strip().lower()
+    custom_index = index_anomaly not in {"", "none", "no_anomaly"}
+    if not (custom_index or bool(data.get("static_external_extractor"))):
+        return False
+    return _kirikiri_embed_checkpoint(game_dir) is not None
+
+
+def _write_kirikiri_embed_launcher(game_dir: Path, exe_rel: str, native_launcher: Path) -> Path:
+    """Write ``启动汉化版.bat`` for the native display-hook delivery route.
+
+    The hook loads ``_translation_meta/kirikiri_native_map.tsv`` (generated from
+    the static checkpoint) and replaces rendered text in-game, so protected
+    archives never need a readable ``patch.xp3``.
+    """
+    native_rel = _relative_to_dir(native_launcher, game_dir) or str(native_launcher)
+    launcher = game_dir / KIRIKIRI_STATIC_LAUNCHER_NAME
+    ps_lines = [
+        "$ErrorActionPreference = 'Stop'",
+        "$GameDir = [Environment]::GetEnvironmentVariable('KIRIKIRI_GAME_DIR', 'Process')",
+        "if ([string]::IsNullOrWhiteSpace($GameDir)) { $GameDir = (Get-Location).Path }",
+        "$GameDir = [System.IO.Path]::GetFullPath($GameDir)",
+        "Set-Location -LiteralPath $GameDir",
+        f"$NativeLauncher = Join-Path $GameDir {_ps_quote(native_rel)}",
+        f"$Exe = Join-Path $GameDir {_ps_quote(exe_rel)}",
+        "if (-not (Test-Path -LiteralPath $NativeLauncher)) { throw ('KiriKiri native launcher not found: ' + $NativeLauncher) }",
+        "if (-not (Test-Path -LiteralPath $Exe)) { throw ('Game executable not found: ' + $Exe) }",
+        "$env:KIRIKIRI_NATIVE_HOOK_PROFILE = 'display'",
+        "$env:KIRIKIRI_ENABLE_EMBED_TEXT_REPLACE = '1'",
+        "$env:KIRIKIRI_EMBED_WAIT_MS = '0'",
+        # The native hook only installs its text hooks when one of the capture
+        # hook lists asks for them. The realtime launcher sets these; the
+        # static embed launcher must set the same list or nothing renders.
+        "$env:KIRIKIRI_CAPTURE_HOOKS = 'kag,zx,embed,z2,kr2'",
+        "$env:KIRIKIRI_LUNA_CAPTURE_HOOKS = 'kag,zx,embed,z2,kr2'",
+        "$env:KIRIKIRI_EXPERIMENTAL_TEXT_HOOKS = '1'",
+        "$env:KIRIKIRI_EXPERIMENTAL_LUNA_HOOKS = '1'",
+        "$QuotedExe = '\"' + $Exe.Replace('\"', '\\\"') + '\"'",
+        "$psi = [System.Diagnostics.ProcessStartInfo]::new()",
+        "$psi.FileName = $NativeLauncher",
+        "$psi.Arguments = $QuotedExe + ' --wait'",
+        "$psi.WorkingDirectory = $GameDir",
+        "$psi.UseShellExecute = $false",
+        "[System.Diagnostics.Process]::Start($psi) | Out-Null",
+    ]
+    encoded = base64.b64encode("\r\n".join(ps_lines).encode("utf-16le")).decode("ascii")
+    launcher.write_text(
+        "@echo off\r\n"
+        "chcp 65001 >nul\r\n"
+        "setlocal\r\n"
+        "set \"KIRIKIRI_GAME_DIR=%~dp0\"\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand "
+        f"{encoded}\r\n"
+        "endlocal\r\n",
+        encoding="ascii",
+    )
+    return launcher
+
+
 def create_kirikiri_static_launcher(game_path: Path, engine: object | None = None,
                                     checkpoint: Path | None = None) -> Path | None:
     """Create the launcher used by the normal KRKR static-patch route.
 
-    The translated game is loaded through KRKR's normal resource lookup. The
-    launcher therefore starts the game executable directly and deploys no
-    native hook DLL or second translation window.
+    For ordinary archives the launcher starts the game executable directly and
+    lets KRKR load the root ``patch.xp3``. For signed/encrypted archives with a
+    custom index (which never read an overlay patch), it starts the native hook
+    with the static translation map so the dialogue is replaced in-game.
     """
-    del checkpoint
     game_path = Path(resolve_game_path(game_path))
     game_dir = game_path if game_path.is_dir() else game_path.parent
     exe_path = _select_launch_exe(game_path, engine)
@@ -358,6 +458,23 @@ def create_kirikiri_static_launcher(game_path: Path, engine: object | None = Non
         return None
 
     preserve_legacy_kirikiri_realtime_launcher(game_dir)
+    if _kirikiri_archive_needs_embed_launcher(game_dir):
+        # 检查点可能只在应用状态目录里（工作区副本未回写），两者都认。
+        embed_checkpoint = checkpoint or _kirikiri_embed_checkpoint(game_dir)
+        native_launcher = _prepare_native_kirikiri_runtime(game_dir, embed_checkpoint)
+        if native_launcher:
+            # 受保护封包只给一个入口：独立 EXE。同时保留旧的 bat 会让玩家
+            # 不知道该点哪个，而且 bat 依赖 PowerShell/执行策略。
+            standalone = _prepare_kirikiri_standalone_launcher(game_dir, exe_rel, embed_checkpoint)
+            if standalone:
+                _remove_legacy_static_batch(game_dir)
+                info(f"KiriKiri 受保护封包，已生成独立汉化 EXE: {standalone}")
+                return standalone
+            warning("独立 EXE 启动器生成失败，退回批处理入口")
+            launcher = _write_kirikiri_embed_launcher(game_dir, exe_rel, native_launcher)
+            info(f"KiriKiri 受保护封包，已生成内嵌汉化启动器: {launcher}")
+            return launcher
+        warning("KiriKiri 受保护封包需要 native hook，但原生运行时部署失败；回退到直接启动游戏")
     launcher = game_dir / KIRIKIRI_STATIC_LAUNCHER_NAME
     # Do not put the Unicode executable name directly in a cmd.exe command.
     # cmd parses batch files using the active console code page, which turns
@@ -390,6 +507,53 @@ def create_kirikiri_static_launcher(game_path: Path, engine: object | None = Non
     )
     info(f"KiriKiri 静态补丁启动器已生成: {launcher}")
     return launcher
+
+
+def _prepare_kirikiri_standalone_launcher(
+    game_dir: Path,
+    exe_rel: str,
+    checkpoint: Path | None = None,
+) -> Path | None:
+    """Deploy the stable EXE entry point used by protected KiriKiri games.
+
+    The EXE is intentionally kept beside the original game executable.  It
+    resolves the target through a small metadata file and delegates injection
+    to the native runtime in ``_translation_meta``; the original XP3 files are
+    therefore left untouched.
+    """
+    source = resource_path("assets", "kirikiri_native_runtime", "x86", "kirikiri_standalone_launcher.exe")
+    if not source.is_file():
+        warning(f"KiriKiri standalone launcher source not found: {source}")
+        return None
+    meta_dir = game_dir / "_translation_meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    launcher = game_dir / KIRIKIRI_STANDALONE_LAUNCHER_NAME
+    target_file = meta_dir / "kirikiri_launcher_target.txt"
+    try:
+        _copy_or_reuse_locked_runtime(source, launcher)
+        target_file.write_text(str(exe_rel).replace("/", "\\") + "\n", encoding="utf-8")
+    except OSError as exc:
+        warning(f"KiriKiri standalone launcher deployment failed: {exc}")
+        return None
+    info(f"KiriKiri 独立汉化 EXE 已生成: {launcher}")
+    return launcher
+
+
+def _remove_legacy_static_batch(game_dir: Path) -> None:
+    """Remove the old batch entry so a protected game exposes a single EXE.
+
+    Upgrading from an earlier version leaves ``启动汉化版.bat`` beside the new
+    EXE; keeping both makes players guess which one to run. The realtime
+    batch is untouched.
+    """
+    legacy = Path(game_dir) / KIRIKIRI_STATIC_LAUNCHER_NAME
+    if not legacy.is_file():
+        return
+    try:
+        legacy.unlink()
+        info(f"已移除旧的批处理入口: {legacy}")
+    except OSError as exc:
+        warning(f"旧批处理入口移除失败: {legacy} - {exc}")
 
 
 def create_godot_display_hook_launcher(game_path: Path, engine: object | None = None,
@@ -1099,6 +1263,47 @@ def _kirikiri_bracket_text_can_be_visible(text: str) -> bool:
     )
 
 
+def _kirikiri_literal_newlines(text: str) -> str:
+    """把真实换行还原成 PSB 使用的字面 ``\\n`` 两字符形态。"""
+    return str(text or "").replace("\r\n", "\\n").replace("\r", "\\n").replace("\n", "\\n")
+
+
+def _kirikiri_split_visible_lines(text: str) -> list[str]:
+    """Split a KAG message into the lines the renderer draws separately.
+
+    KiriKiri draws one line at a time: U+3000 is an in-line break, ``[r]`` and
+    friends are explicit line tags, and PSB text uses a literal ``\\n`` pair.
+    A whole-message key never matches those per-line draw calls, so the map
+    also needs one entry per line.
+    """
+    value = _KIRIKIRI_QUOTE_OPEN_RE.sub("\u300c", str(text or ""))
+    value = _KIRIKIRI_QUOTE_CLOSE_RE.sub("\u300d", value)
+    value = _KIRIKIRI_LINE_TAG_RE.sub("\n", value)
+    value = _KIRIKIRI_INLINE_TAG_RE.sub("", value)
+    return [part.strip() for part in re.split(r"(?:\\n|[\r\n\u3000])+", value) if part.strip()]
+
+
+def _kirikiri_break_variants(text: str) -> list[str]:
+    """返回 ``换行形态 × 断点空格形态`` 的所有组合。
+
+    文本里可能同时出现真换行（``\\r\\n``/``\\n``）和字面 ``\\n`` 两字符；
+    运行时会把字面 ``\\n`` 解释成换行、把 U+3000 折叠成半角空格或删掉。
+    两种来源都要展开，否则长台词会在绘制路径 miss。
+    """
+    base = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    forms = [base]
+    if "\\n" in base:
+        forms.append(base.replace("\\n", "\n"))
+    out: list[str] = []
+    for form in forms:
+        for newline in ("\n", "\r\n"):
+            for space in ("\u3000", " ", ""):
+                value = form.replace("\n", newline).replace("\u3000", space)
+                if value not in out:
+                    out.append(value)
+    return out
+
+
 def _kirikiri_display_map_variants(original: str, translated: str) -> list[tuple[str, str]]:
     variants: list[tuple[str, str]] = []
 
@@ -1120,6 +1325,13 @@ def _kirikiri_display_map_variants(original: str, translated: str) -> list[tuple
         return variants
 
     add(original, translated)
+    # KiriKiri 的 PSB 文本把换行存成字面两个字符 ``\n``（反斜杠 + n），运行时
+    # 原样传给渲染器；其后的 U+3000 还可能被折叠成半角空格或被删掉。
+    # 字面换行 × 断点形态必须逐项成对提供，否则长台词会在绘制路径 miss。
+    literal_src = _kirikiri_literal_newlines(original)
+    literal_dst = _kirikiri_literal_newlines(translated)
+    for space in ("\u3000", " ", ""):
+        add(literal_src.replace("\u3000", space), literal_dst.replace("\u3000", space))
     # \u6309\u89c4\u8303\u5316\u7b56\u7565\u5bf9\u9f50 src/dst\uff1a\u540c\u4e00\u7b56\u7565\u7684 key \u624d\u914d\u5bf9\uff0c\u907f\u514d min(len) \u4e0b\u6807\u9519\u4f4d\u4e32\u4f4d\u3002
     visible_srcs = _kirikiri_visible_text_variants(original)
     visible_dsts = _kirikiri_visible_text_variants(translated)
@@ -1128,11 +1340,51 @@ def _kirikiri_display_map_variants(original: str, translated: str) -> list[tuple
         dst = visible_dsts.get(style)
         if src and dst:
             add(src, dst)
+    # Per-line entries: the renderer draws each line separately, so a
+    # whole-message key alone leaves multi-line dialogue untranslated.
+    source_lines = _kirikiri_split_visible_lines(original)
+    translated_lines = _kirikiri_split_visible_lines(translated)
+    if len(source_lines) >= 2 and len(source_lines) == len(translated_lines):
+        for src_line, dst_line in zip(source_lines, translated_lines):
+            add(src_line, dst_line)
+    # 换行/断点形态组合：运行时可能保留 \r\n、折叠成 \n，字面 ``\n`` 会被解释
+    # 成换行，U+3000 也可能被换成半角空格或删掉。源侧展开全部组合，译文统一
+    # 归一化（保留换行），避免两侧组合数量不一致导致 zip 错配。
+    if "\n" in original or "\\n" in original or "\u3000" in original:
+        dst_normalized = str(translated or "").replace("\r\n", "\n").replace("\\n", "\n").replace("\r", "\n")
+        for src_break in _kirikiri_break_variants(original):
+            add(src_break, dst_normalized)
     return variants
 
 
 # \u8fd0\u884c\u65f6 KagParserVisibleText \u7684\u89c4\u8303\u5316\u7b56\u7565\u987a\u5e8f\uff0c\u9759\u6001\u4fa7\u5fc5\u987b\u9010\u4e00\u590d\u523b\u3002
-_KIRIKIRI_VISIBLE_STYLES = ("runtime_like", "line_joined", "compact")
+_KIRIKIRI_VISIBLE_STYLES = ("runtime_collapsed", "runtime_like", "line_joined", "compact")
+
+
+def _kirikiri_collapse_runtime_spaces(text: str) -> str:
+    """Mirror KiriKiri ``CollapseWideSpaces(text, keepNewlines=True)``.
+
+    KiriKiri treats U+3000 as an in-line line break, but the visible-text
+    normalisation collapses it (and tabs/spaces) into a single half-width
+    space. A translation map that keeps U+3000 therefore never matches a
+    multi-line message at runtime, while single-line messages still match.
+    """
+    out: list[str] = []
+    in_space = False
+    for ch in str(text or ""):
+        if ch not in " \t\u3000\r\n":
+            out.append(ch)
+            in_space = False
+            continue
+        if ch in "\r\n":
+            if not out or out[-1] != "\n":
+                out.append("\n")
+            in_space = False
+            continue
+        if not in_space:
+            out.append(" ")
+            in_space = True
+    return "".join(out).strip()
 
 
 def _kirikiri_visible_text_variants(text: str) -> dict[str, str]:
@@ -1151,6 +1403,10 @@ def _kirikiri_visible_text_variants(text: str) -> dict[str, str]:
     with_newlines = _KIRIKIRI_LINE_TAG_RE.sub("\n", value)
     without_tags = _KIRIKIRI_INLINE_TAG_RE.sub("", with_newlines)
     collapsed_spaces = re.sub(r"[ \t\u3000]+", " ", without_tags)
+    # runtime_collapsed：逐字复刻 native 的 CollapseWideSpaces(text, keepNewlines=True)。
+    # KiriKiri 把 U+3000 当作行内换行，运行时可见文本会把 U+3000 折叠成一个半角空格；
+    # 地图若只保留 U+3000，多行消息就永远匹配不上（单行不含 U+3000 所以正常）。
+    runtime_collapsed = _kirikiri_collapse_runtime_spaces(without_tags)
     # runtime_like\uff1a\u6298\u53e0\u6362\u884c\u4e24\u4fa7\u7a7a\u683c\u4f46\u4e0d\u9010\u884c strip \u5185\u5bb9\uff0c\u8d34\u8fd1\u8fd0\u884c\u65f6 CollapseWideSpaces
     runtime_like = re.sub(r"[ \t\u3000]*\n[ \t\u3000]*", "\n", collapsed_spaces).strip()
     # line_joined\uff1a\u9010\u884c strip \u540e join\uff08\u4fdd\u7559\u65e7\u884c\u4e3a\uff0c\u8986\u76d6\u591a\u884c\u6d88\u606f\uff09
@@ -1159,6 +1415,7 @@ def _kirikiri_visible_text_variants(text: str) -> dict[str, str]:
     compact = re.sub(r"\s+", "", without_tags)
     out: dict[str, str] = {}
     for style, candidate in (
+        ("runtime_collapsed", runtime_collapsed),
         ("runtime_like", runtime_like),
         ("line_joined", line_joined),
         ("compact", compact),

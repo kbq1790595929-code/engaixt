@@ -900,12 +900,24 @@ bool ContainsJapanese(const std::wstring &s) {
 }
 
 bool IsPathLikeText(const std::wstring &s) {
-    if (s.find(L".ks") != std::wstring::npos ||
-        s.find(L".tjs") != std::wstring::npos ||
-        s.find(L".xp3") != std::wstring::npos ||
-        s.find(L".dll") != std::wstring::npos ||
-        s.find(L"/") != std::wstring::npos ||
-        s.find(L"\\") != std::wstring::npos) {
+    // PSB 台词用字面 ``\n``（反斜杠 + n）表示换行，不能因为出现反斜杠
+    // 就把整段台词当成文件路径拒掉。先剔除转义序列再做路径判断。
+    std::wstring cleaned;
+    cleaned.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == L'\\' && i + 1 < s.size() &&
+            (s[i + 1] == L'n' || s[i + 1] == L'r' || s[i + 1] == L't')) {
+            ++i;
+            continue;
+        }
+        cleaned.push_back(s[i]);
+    }
+    if (cleaned.find(L".ks") != std::wstring::npos ||
+        cleaned.find(L".tjs") != std::wstring::npos ||
+        cleaned.find(L".xp3") != std::wstring::npos ||
+        cleaned.find(L".dll") != std::wstring::npos ||
+        cleaned.find(L"/") != std::wstring::npos ||
+        cleaned.find(L"\\") != std::wstring::npos) {
         return true;
     }
     return false;

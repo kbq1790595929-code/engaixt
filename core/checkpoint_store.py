@@ -28,10 +28,33 @@ def legacy_checkpoint_path(game_path: str | Path) -> Path:
     return game_dir_of(game_path) / "_translation_meta" / "translation_checkpoint.json"
 
 
+def _checkpoint_is_stale(path: Path, game_dir: Path, data: dict) -> bool:
+    """Reject a checkpoint produced from a different copy of the game.
+
+    ``game_id`` is derived from the directory path only, so re-extracting the
+    game to the same path used to silently reuse the previous translations.
+    """
+    fingerprint = str(data.get("content_fingerprint") or "").strip()
+    current = manifest_state.game_content_fingerprint(game_dir)
+    if fingerprint:
+        return bool(current) and fingerprint != current
+    # Older checkpoints have no fingerprint. If any game payload file is newer
+    # than the checkpoint, the game was re-extracted or replaced afterwards.
+    try:
+        newest = manifest_state.newest_game_resource_mtime(game_dir)
+        if newest and newest > path.stat().st_mtime:
+            return True
+    except OSError:
+        return False
+    return False
+
+
 def _belongs_to_game(path: Path, game_dir: Path) -> bool:
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError, TypeError):
+        return False
+    if not isinstance(data, dict):
         return False
     source = str(data.get("source") or "").strip()
     items = data.get("items")
@@ -49,11 +72,13 @@ def _belongs_to_game(path: Path, game_dir: Path) -> bool:
                 return False
         except OSError:
             return False
-        return True
-    try:
-        return Path(source).resolve() == game_dir.resolve()
-    except OSError:
-        return False
+    else:
+        try:
+            if Path(source).resolve() != game_dir.resolve():
+                return False
+        except OSError:
+            return False
+    return not _checkpoint_is_stale(path, game_dir, data)
 
 
 def import_checkpoint_to_workspace(

@@ -594,8 +594,9 @@ def is_translatable(text: str) -> bool:
     if len(stripped) < 1:
         return False
 
-    # 排除含控制字符的二进制数据
-    if any(0 < ord(c) < 32 for c in stripped):
+    # 排除含控制字符的二进制数据。换行/制表符是正常文本内容
+    # （KiriKiri PSB 的多行消息就是 "第一行\r\n第二行"），不能一起判为二进制。
+    if any(0 < ord(c) < 32 and c not in "\r\n\t" for c in stripped):
         return False
 
     # 排除 Godot 资源路径和 UID

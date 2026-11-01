@@ -70,8 +70,7 @@ MODEL_SPECS: dict[str, HyMt2ModelSpec] = {
         source_url=_ENGAIXT_MODEL_ROOT + "/EngAixt-7B-Q4_K_M.gguf",
         license_url=_ENGAIXT_MODEL_ROOT + "/EngAixt-7B-LICENSE.txt",
         description=(
-            "约 4.3 GB，基于腾讯混元 Hy-MT2-7B（Apache 2.0）自训的日译中文本模型，"
-            "控制符保护与 EngAixt 生产链路同格式。"
+            "约 4.3 GB，EngAixt 自训的日译中文本模型，控制符保护与 EngAixt 生产链路同格式。"
             "真实游戏文本全量 4,239 行实测（batch 20）：整批 JSON 契约 212/212 正确，"
             "控制符保留 99.71%（语义类 99.17%），空译文 0，日文残留 38 条。"
             "仅训练日译中；建议 8 GB 以上显存。"
@@ -79,7 +78,11 @@ MODEL_SPECS: dict[str, HyMt2ModelSpec] = {
     ),
 }
 
-DEFAULT_MODEL_NAME = "Hy-MT2-1.8B-Q4_K_M"
+# The Tencent base-model entries above remain readable for older manifests,
+# but they are no longer offered as downloadable choices. New installations
+# expose only EngAixt's self-trained weights; any other GGUF is selected by
+# the user through the local file picker.
+DEFAULT_MODEL_NAME = "EngAixt-7B-Q4_K_M"
 
 
 def resolve_model_name(value: str | None) -> str:
@@ -92,4 +95,4 @@ def model_spec(value: str | None = None) -> HyMt2ModelSpec:
 
 
 def model_choices() -> tuple[HyMt2ModelSpec, ...]:
-    return tuple(MODEL_SPECS.values())
+    return tuple(spec for spec in MODEL_SPECS.values() if spec.name.startswith("EngAixt-"))

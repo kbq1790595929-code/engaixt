@@ -239,6 +239,8 @@ class Api:
         self._background_tool_update_lock = threading.Lock()
         self._preflight_lock = threading.Lock()
         self._preflight_paths: set[str] = set()
+        self._hy_mt2_install_lock = threading.Lock()
+        self._hy_mt2_install_task_id: str | None = None
 
 
 
@@ -318,6 +320,8 @@ class Api:
             "anthropic_model": c.anthropic_model,
 
             "hy_mt2_model": c.hy_mt2_model,
+
+            "hy_mt2_custom_model_path": c.hy_mt2_custom_model_path,
 
             "hy_mt2_context_size": c.hy_mt2_context_size,
 
@@ -402,6 +406,56 @@ class Api:
     def refresh_cloud_model_catalog(self, provider: str):
         """Refresh models on explicit UI actions only; translation never calls this."""
         return self.get_cloud_model_catalog(provider)
+
+    def get_custom_pricing(self):
+        """Return the user-entered tariff table used by cost estimates."""
+        config = get_config()
+        return {"ok": True, "custom_pricing": dict(config.custom_pricing or {})}
+
+    def save_custom_pricing(self, payload):
+        """Merge a user-entered tariff table; unlisted providers are kept."""
+        config = get_config()
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "invalid payload"}
+        merged = dict(config.custom_pricing or {})
+        for provider, models in payload.items():
+            provider_key = str(provider or "").strip().lower()
+            if not provider_key or not isinstance(models, dict):
+                continue
+            provider_table: dict = {}
+            for model, entry in models.items():
+                model_key = str(model or "").strip()
+                if not model_key or not isinstance(entry, dict):
+                    continue
+                try:
+                    input_rate = float(entry.get("input_cny_per_m"))
+                    output_rate = float(entry.get("output_cny_per_m"))
+                except (TypeError, ValueError):
+                    continue
+                if input_rate < 0 or output_rate < 0:
+                    continue
+                saved = {
+                    "input_cny_per_m": input_rate,
+                    "output_cny_per_m": output_rate,
+                }
+                for extra_key in ("input_cache_hit_cny_per_m", "input_cache_miss_cny_per_m"):
+                    raw_extra = entry.get(extra_key)
+                    if raw_extra is None:
+                        continue
+                    try:
+                        extra_value = float(raw_extra)
+                    except (TypeError, ValueError):
+                        continue
+                    if extra_value >= 0:
+                        saved[extra_key] = extra_value
+                provider_table[model_key] = saved
+            if provider_table:
+                merged[provider_key] = provider_table
+            else:
+                merged.pop(provider_key, None)
+        config.custom_pricing = merged
+        save_config()
+        return {"ok": True, "custom_pricing": merged}
 
     def get_cloud_pricing(self, provider: str, model: str):
         from core.cloud_model_catalog import pricing_for_display
@@ -577,6 +631,60 @@ class Api:
         root.destroy()
 
         return path.replace("/", "\\") if path else ""
+
+    def select_gguf_model(self):
+        """Select any local GGUF file for the offline translator."""
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        path = filedialog.askopenfilename(
+            title="选择本地 GGUF 模型",
+            filetypes=[("GGUF 模型", "*.gguf"), ("所有文件", "*.*")],
+        )
+        root.destroy()
+        return path.replace("/", "\\") if path else ""
+
+    def set_hy_mt2_custom_model(self, path: str):
+        from pathlib import Path
+        from config import get_config, save_config
+
+        candidate = Path(str(path or "").strip()).expanduser()
+        if not candidate.is_file() or candidate.suffix.casefold() != ".gguf":
+            raise ValueError("请选择存在的 .gguf 模型文件")
+        c = get_config()
+        c.hy_mt2_custom_model_path = str(candidate.resolve())
+        save_config()
+        try:
+            from translators.hy_mt2_component import invalidate_component_status_cache
+            invalidate_component_status_cache()
+        except Exception:
+            pass
+        try:
+            from translators.hy_mt2_runtime import shutdown_runtime
+            shutdown_runtime()
+        except Exception:
+            pass
+        return self.get_hy_mt2_status()
+
+    def clear_hy_mt2_custom_model(self):
+        from config import get_config, save_config
+
+        c = get_config()
+        c.hy_mt2_custom_model_path = ""
+        save_config()
+        try:
+            from translators.hy_mt2_component import invalidate_component_status_cache
+            invalidate_component_status_cache()
+        except Exception:
+            pass
+        try:
+            from translators.hy_mt2_runtime import shutdown_runtime
+            shutdown_runtime()
+        except Exception:
+            pass
+        return self.get_hy_mt2_status()
 
 
 
@@ -1517,22 +1625,44 @@ class Api:
         from translators.hy_mt2_component import component_status
         from translators.hy_mt2_runtime import runtime_status
 
-        return {**component_status(), **runtime_status()}
+        status = {**component_status(), **runtime_status()}
+        with self._hy_mt2_install_lock:
+            task_id = self._hy_mt2_install_task_id
+        if task_id:
+            task = self._tasks.get(task_id)
+            status["installing"] = bool(task and task.status in {"pending", "running"})
+            status["install_task_id"] = task_id
+        else:
+            status["installing"] = False
+            status["install_task_id"] = ""
+        return status
+
+    def cancel_hy_mt2_install(self):
+        """Cancel the active GGUF download/unpack task, if one exists."""
+        with self._hy_mt2_install_lock:
+            task_id = self._hy_mt2_install_task_id
+        if not task_id:
+            return {"ok": False, "reason": "没有正在进行的本地组件下载"}
+        return {"ok": self._tasks.cancel(task_id), "task_id": task_id}
 
     def install_hy_mt2_component(self):
+        with self._hy_mt2_install_lock:
+            existing_id = self._hy_mt2_install_task_id
+        if existing_id:
+            existing = self._tasks.get(existing_id)
+            if existing and existing.status in {"pending", "running"}:
+                return {"ok": False, "already_running": True, "task_id": existing_id}
         self._js("on_status('下载离线模型')")
-        try:
-            from translators.hy_mt2_component import component_status
-
-            model_label = str(component_status().get("model_label") or "腾讯 Hy-MT2 离线模型")
-        except Exception:
-            model_label = "腾讯 Hy-MT2 离线模型"
+        # Do not synchronously inspect model directories here. The API call is
+        # made by the WebView thread and must return immediately so the user
+        # can still press the cancel button.
+        model_label = "本地 GGUF 模型"
         self._js("on_log(20, " + json.dumps(f"开始下载 {model_label}...", ensure_ascii=False) + ")")
 
         last_logged_percent = {"value": -10.0}
 
         def progress(event: dict):
-            message = str(event.get("message") or "下载 Hy-MT2 离线组件")
+            message = str(event.get("message") or "下载本地 GGUF 模型组件")
             phase = str(event.get("phase") or "")
             percent = float(event.get("percent") or 0)
             self._js(f"on_progress({json.dumps(message, ensure_ascii=False)}, {percent:.2f})")
@@ -1545,10 +1675,12 @@ class Api:
 
         def _run(task):
             try:
-                from translators.hy_mt2_component import install_component
+                from translators.hy_mt2_component import ComponentInstallCancelled, install_component
                 from translators.hy_mt2_runtime import verify_selected_model
 
-                status = install_component(progress)
+                status = install_component(progress, cancel_event=task.cancel_event)
+                if task.cancelled:
+                    raise ComponentInstallCancelled("本地 GGUF 组件下载已取消")
                 verification_message = "自动启动本地后端并执行健康检查"
                 progress({
                     "phase": "verify_backend",
@@ -1557,27 +1689,40 @@ class Api:
                     "total_bytes": 1,
                     "percent": 100,
                 })
+                if task.cancelled:
+                    raise ComponentInstallCancelled("本地 GGUF 组件下载已取消")
                 self._js("on_log(20, " + json.dumps(
-                    f"{status.get('model_label') or 'Hy-MT2 离线模型'} 已下载，正在自动配置并验证本地后端...",
+                    f"{status.get('model_label') or '本地 GGUF 模型'} 已下载，正在自动配置并验证本地后端...",
                     ensure_ascii=False,
                 ) + ")")
                 verification = verify_selected_model()
                 status["deployment_verification"] = verification
                 self._js("on_log(20, " + json.dumps(
-                    f"{status.get('model_label') or 'Hy-MT2 离线模型'} 已完成一键部署："
+                    f"{status.get('model_label') or '本地 GGUF 模型'} 已完成一键部署："
                     f"{verification.get('backend') or 'unknown'} 后端已验证",
                     ensure_ascii=False,
                 ) + ")")
                 self._js("on_progress('离线组件安装完成', 100)")
                 self._js("on_status('空闲')")
+                status["installing"] = False
                 self._js("onHyMt2Status(" + json.dumps(status, ensure_ascii=False) + ")")
+            except ComponentInstallCancelled as exc:
+                self._js("on_log(20, " + json.dumps(str(exc), ensure_ascii=False) + ")")
+                self._js("on_status('空闲')")
+                self._js("onHyMt2InstallCancelled()")
             except Exception as exc:
-                self._js("on_log(50, " + json.dumps("Hy-MT2 组件安装失败: " + str(exc), ensure_ascii=False) + ")")
+                self._js("on_log(50, " + json.dumps("本地 GGUF 组件安装失败: " + str(exc), ensure_ascii=False) + ")")
                 self._js("on_status('错误')")
                 self._js("onHyMt2InstallFailed(" + json.dumps(str(exc), ensure_ascii=False) + ")")
+            finally:
+                with self._hy_mt2_install_lock:
+                    if self._hy_mt2_install_task_id == task.id:
+                        self._hy_mt2_install_task_id = None
 
-        self._tasks.submit("下载 Hy-MT2 离线组件", _run, kind="models", counted=True)
-        return True
+        task = self._tasks.submit("下载本地 GGUF 模型组件", _run, kind="models", counted=True)
+        with self._hy_mt2_install_lock:
+            self._hy_mt2_install_task_id = task.id if task.status in {"pending", "running"} else None
+        return {"ok": True, "task_id": task.id}
 
     def remove_hy_mt2_component(self):
         def _run(task):
@@ -1586,14 +1731,14 @@ class Api:
 
                 status = remove_component()
                 self._js("on_log(20, " + json.dumps(
-                    f"{status.get('model_label') or 'Hy-MT2 离线模型'} 已删除", ensure_ascii=False
+                    f"{status.get('model_label') or '本地 GGUF 模型'} 已删除", ensure_ascii=False
                 ) + ")")
                 self._js("onHyMt2Status(" + json.dumps(status, ensure_ascii=False) + ")")
             except Exception as exc:
-                self._js("on_log(50, " + json.dumps("删除 Hy-MT2 组件失败: " + str(exc), ensure_ascii=False) + ")")
+                self._js("on_log(50, " + json.dumps("删除本地 GGUF 组件失败: " + str(exc), ensure_ascii=False) + ")")
                 self._js("onHyMt2InstallFailed(" + json.dumps(str(exc), ensure_ascii=False) + ")")
 
-        self._tasks.submit("删除 Hy-MT2 离线组件", _run, kind="models", counted=True)
+        self._tasks.submit("删除本地 GGUF 模型组件", _run, kind="models", counted=True)
         return True
 
     def start_background_tool_update_check(self):

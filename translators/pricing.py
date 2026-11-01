@@ -51,9 +51,52 @@ DEEPSEEK_V4_PRO = ModelPricing(
 UNKNOWN_FALLBACK = ModelPricing(1.0, 2.0, "unknown-fallback-deepseek-v4-flash")
 
 
+def _custom_pricing_override(provider_key: str, model_key: str) -> ModelPricing | None:
+    """Return the user-supplied price for this provider/model, if any.
+
+    The settings UI lets users enter the official tariff themselves, which is
+    more reliable than shipping a dated built-in table. ``*`` acts as a
+    provider-wide fallback.
+    """
+    try:
+        from config import get_config
+
+        table = get_config().custom_pricing or {}
+    except Exception:
+        return None
+    if not isinstance(table, dict):
+        return None
+    provider_table = table.get(provider_key)
+    if not isinstance(provider_table, dict):
+        return None
+    entry = provider_table.get(model_key)
+    if not isinstance(entry, dict):
+        entry = provider_table.get("*")
+    if not isinstance(entry, dict):
+        return None
+    try:
+        input_rate = float(entry.get("input_cny_per_m"))
+        output_rate = float(entry.get("output_cny_per_m"))
+    except (TypeError, ValueError):
+        return None
+    if input_rate < 0 or output_rate < 0:
+        return None
+    return ModelPricing(
+        input_rate,
+        output_rate,
+        "user-custom-pricing",
+        input_cache_hit_cny_per_m=entry.get("input_cache_hit_cny_per_m"),
+        input_cache_miss_cny_per_m=entry.get("input_cache_miss_cny_per_m"),
+    )
+
+
 def pricing_for(provider: str | None, model: str | None) -> ModelPricing:
     provider_key = str(provider or "").strip().lower()
     model_key = str(model or "").strip().lower()
+
+    custom = _custom_pricing_override(provider_key, model_key)
+    if custom is not None:
+        return custom
 
     if provider_key == "hy_mt2":
         return ModelPricing(0.0, 0.0, "local-offline-no-api-cost")

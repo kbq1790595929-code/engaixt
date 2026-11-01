@@ -393,6 +393,32 @@
 </div>
 
 <!-- ── 使用说明 ── -->
+<!-- 自定义价格 -->
+<div class="overlay" id="custom-pricing-overlay">
+  <div class="overlay-content custom-pricing-content">
+    <div class="modal-head">
+      <h2>模型价格</h2>
+      <button class="icon-btn" onclick="closeCustomPricing()" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="field">
+      <label>服务商</label>
+      <select id="custom-pricing-provider" onchange="onCustomPricingProviderChanged()"></select>
+    </div>
+    <table class="custom-pricing-table">
+      <thead><tr><th>模型</th><th>输入·缓存命中<br><span class="custom-pricing-unit">元/百万 tokens</span></th><th>输入·缓存未命中<br><span class="custom-pricing-unit">元/百万 tokens</span></th><th>输出<br><span class="custom-pricing-unit">元/百万 tokens</span></th><th></th></tr></thead>
+      <tbody id="custom-pricing-rows"></tbody>
+    </table>
+    <div class="custom-pricing-actions">
+      <button type="button" class="btn btn-sm" onclick="addCustomPricingRow()"><svg class="ic"><use href="#i-spark"/></svg>添加模型</button>
+      <span class="settings-note" id="custom-pricing-status"></span>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-sm" onclick="closeCustomPricing()">取消</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick="saveCustomPricing()"><svg class="ic"><use href="#i-check"/></svg>保存</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="help-overlay">
   <div class="overlay-content help-content">
     <div class="modal-head">
@@ -736,7 +762,7 @@
       <div class="hy-mt2-component" id="hy-mt2-component">
         <div class="hy-mt2-component-head">
           <div>
-            <strong>Hy-MT2 离线组件</strong>
+            <strong>本地 GGUF 模型</strong>
             <span id="hy-mt2-status-badge" class="hy-mt2-status-badge">检查中</span>
           </div>
           <span id="hy-mt2-size" class="hy-mt2-size"></span>
@@ -744,27 +770,40 @@
         <div class="field hy-mt2-model-field">
           <label>离线模型</label>
           <select name="hy_mt2_model" onchange="onHyMt2ModelChanged(this.value)">
-            <option value="Hy-MT2-1.8B-Q4_K_M">Hy-MT2 1.8B（轻量，约 1.1 GB）</option>
-            <option value="HY-MT2-7B-Q4_K_M">Hy-MT2 7B Q4（推荐，约 4.3 GB）</option>
-            <option value="HY-MT2-7B-Q8_0">Hy-MT2 7B（高质量，约 7.4 GB）</option>
+            <option value="EngAixt-7B-Q4_K_M">EngAixt 7B（自训，约 4.3 GB）</option>
           </select>
+        </div>
+        <div class="field hy-mt2-custom-model-field">
+          <label>自定义 GGUF（可选）</label>
+          <div class="path-picker-row">
+            <input type="text" class="mono" name="hy_mt2_custom_model_path" readonly placeholder="未选择；选择后优先使用此文件">
+            <button type="button" class="btn btn-sm secondary" onclick="selectCustomGgufModel()">选择文件</button>
+            <button type="button" class="icon-btn" id="hy-mt2-custom-clear-btn" onclick="clearCustomGgufModel()" title="清除自定义模型" aria-label="清除自定义模型" hidden>×</button>
+          </div>
         </div>
         <div id="hy-mt2-status" class="settings-note">正在检查离线组件…</div>
         <div class="hy-mt2-actions">
           <button type="button" class="btn secondary" id="hy-mt2-install-btn" onclick="installHyMt2()"><svg class="ic"><use href="#i-download"/></svg>下载/修复当前模型</button>
           <button type="button" class="icon-btn" id="hy-mt2-remove-btn" onclick="removeHyMt2()" title="删除当前模型" aria-label="删除当前模型" hidden><svg class="ic"><use href="#i-trash"/></svg></button>
         </div>
-        <div class="settings-note hy-mt2-note">两个模型可同时保留，切换不会删除另一个模型。模型和运行器从腾讯 ModelScope 与 llama.cpp 官方源下载，不计入安装包；翻译完全在本机运行，不调用云端翻译 API。</div>
+      <div class="settings-note hy-mt2-note">默认下载 EngAixt 自训模型，也可以直接选择任意本地 GGUF 文件；自定义文件优先使用。GGUF 需要包含可用的聊天模板，运行器使用 llama.cpp，翻译完全在本机运行。</div>
       </div>
     </div>
 
     <!-- 翻译设置 -->
     <div class="tab-panel" id="tab-trans">
-      <div class="field"><label>当前翻译器</label><select name="active_translator" onchange="onTranslatorChanged(this.value)"><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="zhipu">智谱 GLM</option><option value="moonshot">Kimi</option><option value="doubao">豆包 / 火山方舟</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="hy_mt2">腾讯 Hy-MT2（离线）</option></select><div class="settings-note" id="active-cloud-model"></div></div>
+      <div class="field"><label>当前翻译器</label><select name="active_translator" onchange="onTranslatorChanged(this.value)"><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="zhipu">智谱 GLM</option><option value="moonshot">Kimi</option><option value="doubao">豆包 / 火山方舟</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="hy_mt2">本地 GGUF 模型（离线）</option></select><div class="settings-note" id="active-cloud-model"></div></div>
       <div class="field"><label>目标语言</label><select name="target_lang" onchange="syncSettingValue('target_lang', this.value)"><option>zh-CN</option><option>zh-TW</option><option>en</option><option>ja</option><option>ko</option></select></div>
       <div class="field-grid" id="cloud-translation-settings" data-cloud-only>
         <div class="field"><label>云端每批最大条数</label><input type="text" name="max_batch_size"></div>
         <div class="field"><label class="label-with-action">云端最大并发数<button type="button" class="field-alert-btn" onclick="showConcurrencyWarning()" title="云端并发数提示" aria-label="云端并发数提示">!</button></label><input type="text" name="max_concurrency"></div>
+      </div>
+      <div class="field">
+        <label class="label-with-action">模型价格（费用预估）<button type="button" class="field-alert-btn" onclick="showCustomPricingHelp()" title="价格说明" aria-label="价格说明">!</button></label>
+        <button type="button" class="btn btn-sm custom-pricing-open" onclick="openCustomPricing()">
+          <svg class="ic"><use href="#i-chart"/></svg>自定义价格
+        </button>
+        <div class="settings-note">按服务商官网价格填写；不填则使用内置估算。</div>
       </div>
       <div class="field"><label>翻译覆盖率 (%)</label><input type="text" name="translation_coverage"></div>
       <div class="field"><label>最低通过覆盖率 (%)</label><input type="text" name="minimum_translation_coverage"></div>
@@ -1018,5 +1057,6 @@
 <script src="usage_statistics.js"></script>
 <script src="app.js"></script>
 <script src="preflight_settings.js"></script>
+<script src="custom_pricing.js"></script>
 </body>
 </html>

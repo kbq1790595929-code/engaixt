@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from config import get_config
+from core import manifest as manifest_state
 from core.checkpoint_store import import_checkpoint_to_workspace, persist_workspace_checkpoint
 from utils.logger import info, warning
 from utils.text_extract import is_acceptable_same_as_source, validation_source_for_item, verify_translation
@@ -213,6 +214,51 @@ def workspace_has_repack_sources(pipeline, items: list) -> bool:
         return False
     return all((original_dir / rel).exists() for rel in needed)
 
+def _reconcile_checkpoint_with_extraction(pipeline, path: Path, engine, checkpoint_items: list) -> list:
+    """先重新提取，再把检查点里的译文按 (file, text) 对齐回去。
+
+    ``game_id`` 只看游戏目录路径，重新解压到同一路径会映射到旧检查点。
+    如果续翻直接跳过提取，日志会出现"先翻译后解包"的倒序，提取器的修复
+    也永远作用不到旧检查点。这里强制先走提取阶段，检查点只作为译文缓存。
+    """
+    from core.pipeline_stage_runtime import run_extract_stage
+
+    try:
+        engine, extracted_items, _count = run_extract_stage(pipeline, path, engine)
+    except Exception as exc:
+        warning(f"检查点续翻：重新提取失败，沿用检查点条目: {exc}")
+        return checkpoint_items
+    if not extracted_items:
+        warning("检查点续翻：重新提取没有文本，沿用检查点条目")
+        return checkpoint_items
+
+    lookup: dict[tuple[str, str], str] = {}
+    for item in checkpoint_items:
+        original = str(getattr(item, "original", "") or "").strip()
+        translated = str(getattr(item, "translated", "") or "")
+        if original and translated:
+            key = (str(getattr(item, "file", "")).replace("\\", "/"), original)
+            lookup.setdefault(key, translated)
+
+    reused = 0
+    for item in extracted_items:
+        key = (
+            str(getattr(item, "file", "")).replace("\\", "/"),
+            str(getattr(item, "original", "") or "").strip(),
+        )
+        translated = lookup.get(key)
+        if translated:
+            item.translated = translated
+            reused += 1
+
+    info(f"检查点续翻：重新提取 {len(extracted_items)} 条，按原文复用译文 {reused} 条")
+    pipeline.diagnostics.set("checkpoint_reextracted", {
+        "extracted": len(extracted_items),
+        "reused": reused,
+    })
+    return extracted_items
+
+
 async def run_checkpoint_resume_fast_path(
     pipeline,
     path: Path,
@@ -272,6 +318,7 @@ async def run_checkpoint_resume_fast_path(
                 info(f"Tyrano 检查点补入 {added} 条商品显示字段，复用已有译文")
     pipeline.diagnostics.set("checkpoint", str(checkpoint))
     pipeline.diagnostics.set("checkpoint_fast_resume", True)
+    items = _reconcile_checkpoint_with_extraction(pipeline, path, engine, items)
     info(f"从检查点续翻，跳过重新提取: {checkpoint}")
 
     pipeline._update_progress("translate")
@@ -384,6 +431,7 @@ def save_checkpoint_json(pipeline, items: list, game_path: Path,
     data = {
         "source": str(game_dir.resolve()),
         "pck_name": pck_name,
+        "content_fingerprint": manifest_state.game_content_fingerprint(game_dir),
         "source_lang": source_lang,
         "target_lang": target_lang,
         "workspace_root": str(pipeline.workspace.root.resolve()) if pipeline.workspace else "",
@@ -483,6 +531,9 @@ def sync_checkpoint_json(pipeline, checkpoint: Path, items: list) -> None:
 
     if updated > 0:
         data["translated_count"] = sum(1 for r in data["items"] if r.get("translated"))
+        _source = data.get("source")
+        if _source:
+            data["content_fingerprint"] = manifest_state.game_content_fingerprint(Path(str(_source)))
         try:
             payload = _json.dumps(data, ensure_ascii=False, separators=(",", ":"))
             checkpoint.write_text(payload, encoding="utf-8")

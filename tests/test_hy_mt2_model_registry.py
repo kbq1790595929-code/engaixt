@@ -3,7 +3,7 @@ import time
 from config import Config
 from translators.hy_mt2 import HyMt2Translator
 from translators import hy_mt2_component
-from translators.hy_mt2_component import model_path
+from translators.hy_mt2_component import model_path, selected_model_id
 from translators.hy_mt2_models import (
     DEFAULT_MODEL_NAME,
     HyMt2ModelSpec,
@@ -15,15 +15,10 @@ from translators.hy_mt2_models import (
 from translators.hy_mt2_runtime import HyMt2Runtime, LocalCompletion
 
 
-def test_hy_mt2_offline_models_include_lightweight_and_quality_variants():
+def test_local_model_downloads_include_only_engaixt_weights():
     names = [spec.name for spec in model_choices()]
 
-    assert names == [
-        "Hy-MT2-1.8B-Q4_K_M",
-        "HY-MT2-7B-Q4_K_M",
-        "HY-MT2-7B-Q8_0",
-        "EngAixt-7B-Q4_K_M",
-    ]
+    assert names == ["EngAixt-7B-Q4_K_M"]
     assert model_spec("HY-MT2-7B-Q4_K_M").size == 4_624_648_896
     assert model_spec("HY-MT2-7B-Q4_K_M").sha256 == (
         "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b"
@@ -51,8 +46,7 @@ def test_engaixt_7b_model_spec_is_downloadable():
     assert spec.source_url.startswith("https://www.modelscope.cn/models/ENGAOXT/")
     assert spec.source_url.endswith("/" + spec.filename)
     assert spec.license_url.startswith("https://www.modelscope.cn/models/ENGAOXT/")
-    # 本地模型不能成为默认值，否则新用户开箱即失败
-    assert DEFAULT_MODEL_NAME != "EngAixt-7B-Q4_K_M"
+    assert DEFAULT_MODEL_NAME == "EngAixt-7B-Q4_K_M"
 
 
 def test_every_model_source_url_matches_its_declared_filename():
@@ -104,6 +98,42 @@ def test_hy_mt2_models_have_distinct_files_and_invalid_config_falls_back():
     assert light.filename != quality.filename
     assert resolve_model_name("unknown-model") == DEFAULT_MODEL_NAME
     assert DEFAULT_MODEL_NAME in MODEL_SPECS
+
+
+def test_custom_gguf_path_takes_precedence_without_registry_entry(tmp_path, monkeypatch):
+    custom = tmp_path / "Qwen3-8B-Instruct-Q4_K_M.gguf"
+    custom.write_bytes(b"GGUF")
+    monkeypatch.setattr(hy_mt2_component, "configured_custom_model_path", lambda: custom.resolve())
+    monkeypatch.setattr(hy_mt2_component, "custom_model_path", lambda: custom.resolve())
+
+    assert model_path() == custom.resolve()
+    assert model_path(DEFAULT_MODEL_NAME) == custom.resolve()
+    assert selected_model_id() == "custom:" + str(custom.resolve())
+
+
+def test_non_gguf_custom_path_is_ignored(tmp_path, monkeypatch):
+    invalid = tmp_path / "model.bin"
+    invalid.write_bytes(b"model")
+    monkeypatch.setattr(hy_mt2_component, "custom_model_path", lambda: None)
+
+    assert model_path() != invalid
+
+
+def test_custom_gguf_status_does_not_require_registry_hash(tmp_path, monkeypatch):
+    custom = tmp_path / "Any-Instruct-Q5.gguf"
+    custom.write_bytes(b"GGUF payload")
+    component_root = tmp_path / "component"
+    monkeypatch.setattr(hy_mt2_component, "configured_custom_model_path", lambda: custom.resolve())
+    monkeypatch.setattr(hy_mt2_component, "custom_model_path", lambda: custom.resolve())
+    monkeypatch.setattr(hy_mt2_component, "component_dir", lambda: component_root)
+    monkeypatch.setattr(hy_mt2_component, "detect_graphics_adapters", lambda: [])
+
+    status = hy_mt2_component.component_status()
+
+    assert status["custom_model"] is True
+    assert status["local_model_path"] == str(custom.resolve())
+    assert status["model_label"] == "自定义 GGUF：Any-Instruct-Q5.gguf"
+    assert status["ready"] is False
 
 
 def test_hy_mt2_discovers_matching_external_model_without_copying(tmp_path, monkeypatch):

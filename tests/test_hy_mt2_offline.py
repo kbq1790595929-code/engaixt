@@ -51,8 +51,8 @@ class _FakeRuntime:
 def test_hy_mt2_is_registered_as_offline_model():
     assert "hy_mt2" in translator_choices()
     assert create_translator("hy_mt2").name == "hy_mt2"
-    assert translator_model("hy_mt2", Config()) == "Hy-MT2-1.8B-Q4_K_M"
-    pricing = pricing_for("hy_mt2", "Hy-MT2-1.8B-Q4_K_M")
+    assert translator_model("hy_mt2", Config()) == "EngAixt-7B-Q4_K_M"
+    pricing = pricing_for("hy_mt2", "EngAixt-7B-Q4_K_M")
     assert pricing.input_cny_per_m == 0
     assert pricing.output_cny_per_m == 0
 

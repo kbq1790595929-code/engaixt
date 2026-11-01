@@ -5,7 +5,9 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
+import threading
 import time
 import urllib.request
 import zipfile
@@ -36,6 +38,23 @@ LLAMA_LICENSE_URL = f"https://raw.githubusercontent.com/ggml-org/llama.cpp/{LLAM
 ProgressCallback = Callable[[dict], None]
 _LOCAL_MODEL_DISCOVERY_TTL_SECONDS = 300.0
 _local_model_discovery_cache: dict[str, tuple[float, Path | None]] = {}
+_COMPONENT_STATUS_TTL_SECONDS = 1.5
+_component_status_cache: dict[tuple, tuple[float, dict]] = {}
+_component_status_lock = threading.RLock()
+
+
+class ComponentInstallCancelled(RuntimeError):
+    """Raised when the user cancels a local-model install."""
+
+
+def _raise_if_cancelled(cancel_event) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ComponentInstallCancelled("本地 GGUF 组件下载已取消")
+
+
+def invalidate_component_status_cache() -> None:
+    with _component_status_lock:
+        _component_status_cache.clear()
 
 
 @dataclass(frozen=True)
@@ -100,7 +119,42 @@ def selected_model_name() -> str:
         return DEFAULT_MODEL_NAME
 
 
+def configured_custom_model_path() -> Path | None:
+    """Return the configured custom path, even if the file is currently missing."""
+    try:
+        from config import get_config
+
+        raw = str(getattr(get_config(), "hy_mt2_custom_model_path", "") or "").strip()
+    except Exception:
+        raw = ""
+    return Path(raw).expanduser() if raw else None
+
+
+def custom_model_path() -> Path | None:
+    """Return the user-selected GGUF only when it still exists and is valid."""
+    path = configured_custom_model_path()
+    if path is None:
+        return None
+    try:
+        if path.is_file() and path.suffix.casefold() == ".gguf":
+            return path.resolve()
+    except OSError:
+        pass
+    return None
+
+
+def selected_model_id() -> str:
+    """Stable cache/runtime identity for the active local model."""
+    custom = configured_custom_model_path()
+    if custom is not None:
+        return "custom:" + str(custom)
+    return selected_model_name()
+
+
 def model_path(model_name: str | None = None) -> Path:
+    custom = configured_custom_model_path()
+    if custom is not None and model_name in (None, selected_model_name(), selected_model_id()):
+        return custom
     selected = selected_model_name() if model_name is None else model_name
     spec = model_spec(selected)
     return _registered_model_path(spec, _load_manifest())
@@ -215,7 +269,32 @@ def detected_hardware() -> dict[str, str]:
     return classify_graphics_adapters(detect_graphics_adapters())
 
 
+def _component_status_cache_key(model_name: str | None) -> tuple:
+    configured = configured_custom_model_path()
+    return (
+        model_name,
+        selected_model_name(),
+        str(configured) if configured is not None else "",
+        str(component_dir()),
+        # Tests and embedders may replace hardware detection at runtime.
+        id(detect_graphics_adapters),
+    )
+
+
 def component_status(model_name: str | None = None) -> dict:
+    """Return component status quickly and avoid overlapping expensive scans."""
+    with _component_status_lock:
+        now = time.monotonic()
+        key = _component_status_cache_key(model_name)
+        cached = _component_status_cache.get(key)
+        if cached and now - cached[0] < _COMPONENT_STATUS_TTL_SECONDS:
+            return cached[1]
+        status = _component_status_uncached(model_name)
+        _component_status_cache[key] = (now, status)
+        return status
+
+
+def _component_status_uncached(model_name: str | None = None) -> dict:
     """Return selected-model status without hashing multi-gigabyte files.
 
     Files are hashed during download/repair. The persisted verified manifest
@@ -226,13 +305,52 @@ def component_status(model_name: str | None = None) -> dict:
     manifest = _load_manifest()
     executable = runtime_executable()
     installed_runner = _detect_installed_runner(manifest)
+    configured_custom = configured_custom_model_path()
+    custom = custom_model_path()
+    if configured_custom is not None and model_name in (None, selected_model_name(), selected_model_id()):
+        runtime_ready = _runtime_has_backend(installed_runner)
+        hardware_matches = bool(installed_runner) and installed_runner == hardware["runner"]
+        ready = custom is not None and runtime_ready and hardware_matches
+        size = custom.stat().st_size if custom is not None else 0
+        label = f"自定义 GGUF：{configured_custom.name}"
+        message = (
+            f"{label} 已就绪：{hardware['name']} / {installed_runner}"
+            if ready
+            else f"已选择本地模型：{configured_custom}；文件不存在或需要可用的 llama.cpp 运行器"
+        )
+        return {
+            "ready": ready,
+            "model_ready": custom is not None,
+            "runtime_ready": runtime_ready,
+            "hardware_matches": hardware_matches,
+            "hardware": hardware,
+            "runner": installed_runner,
+            "expected_runner": hardware["runner"],
+            "model": selected_model_id(),
+            "model_label": label,
+            "model_size": size,
+            # A custom file is already explicit. Do not scan the filesystem
+            # again for every built-in model while rendering this status.
+            "models": [_model_status(spec, manifest, discover=False) for spec in model_choices()],
+            "local_model_found": custom is not None,
+            "local_model_path": str(configured_custom),
+            "custom_model": True,
+            "installed_bytes": size + _runtime_declared_bytes(manifest),
+            "component_dir": str(component_dir()),
+            "message": message,
+            "version": str(manifest.get("runtime_version") or ""),
+        }
     model_rows = [_model_status(spec, manifest) for spec in model_choices()]
+    if not any(row["name"] == selected.name for row in model_rows):
+        # Keep status queries for legacy installations readable even though
+        # legacy base models are no longer offered as download choices.
+        model_rows.append(_model_status(selected, manifest))
     selected_row = next(row for row in model_rows if row["name"] == selected.name)
     model_ready = bool(selected_row["ready"])
     runtime_ready = _runtime_has_backend(installed_runner)
     hardware_matches = bool(installed_runner) and installed_runner == hardware["runner"]
     ready = model_ready and runtime_ready and hardware_matches
-    installed_bytes = _directory_size(component_dir()) if component_dir().exists() else 0
+    installed_bytes = _installed_component_bytes(model_rows, manifest)
     installed_models = [row["label"] for row in model_rows if row["ready"]]
     local_model_found = bool(selected_row.get("candidate_path"))
     if ready:
@@ -274,19 +392,25 @@ def component_status(model_name: str | None = None) -> dict:
 def install_component(
     progress_callback: ProgressCallback | None = None,
     model_name: str | None = None,
+    cancel_event=None,
 ) -> dict:
+    _raise_if_cancelled(cancel_event)
+    invalidate_component_status_cache()
+    custom_selected = configured_custom_model_path() is not None
+    if custom_selected and custom_model_path() is None:
+        raise RuntimeError("已选择的自定义 GGUF 不存在或扩展名无效，请重新选择模型文件")
     selected = model_spec(selected_model_name() if model_name is None else model_name)
     root = component_dir()
     current = component_status(selected.name)
     info(
-        f"[Hy-MT2 部署] 已选择模型: {selected.name}; 文件={selected.filename}; "
+        f"[本地 GGUF] 已选择模型: {selected.name}; 文件={selected.filename}; "
         f"大小={_format_gib(selected.size)}"
     )
     if (
         current.get("ready")
         and current.get("version") == LLAMA_RELEASE
     ):
-        info("[Hy-MT2 部署] 模型与本地运行器已就绪，跳过重复下载")
+        info("[本地 GGUF] 模型与本地运行器已就绪，跳过重复下载")
         _emit(progress_callback, "done", f"{selected.label} 已是最新状态", 1, 1)
         return current
     downloads = root / "downloads"
@@ -295,7 +419,7 @@ def install_component(
     runner = hardware["runner"]
     assets = RUNTIME_ASSETS[runner]
     info(
-        f"[Hy-MT2 部署] 自动检测硬件: {hardware['name']}; "
+        f"[本地 GGUF] 自动检测硬件: {hardware['name']}; "
         f"选择运行器={runner}; 运行器包={len(assets)}"
     )
     model_ready = bool(current.get("model_ready"))
@@ -307,7 +431,7 @@ def install_component(
         and current.get("runner") == runner
     )
     if runtime_ready:
-        info(f"[Hy-MT2 部署] 复用现有 {runner} 运行器，不重复下载")
+        info(f"[本地 GGUF] 复用现有 {runner} 运行器，不重复下载")
     total_bytes = (0 if model_ready or local_candidate else selected.size) + (
         0 if runtime_ready else sum(asset.size for asset in assets)
     )
@@ -315,25 +439,27 @@ def install_component(
     completed_bytes = 0
 
     _emit(progress_callback, "prepare", f"准备 {selected.label}", 0, total_bytes)
+    _raise_if_cancelled(cancel_event)
     model_download = downloads / selected.filename
     managed_model = _managed_model_path(selected)
-    verified_model = model_path(selected.name) if model_ready else None
+    verified_model = custom_model_path() if custom_selected else (_registered_model_path(selected, manifest) if model_ready else None)
     downloaded_model = False
     if model_ready:
-        info(f"[Hy-MT2 部署] 已验证的模型文件存在，跳过下载: {verified_model}")
+        info(f"[本地 GGUF] 已验证的模型文件存在，跳过下载: {verified_model}")
         _emit(progress_callback, "model_ready", f"{selected.label} 已存在，跳过下载", 0, total_bytes)
     elif local_candidate:
+        _raise_if_cancelled(cancel_event)
         _emit(progress_callback, "verify_local_model", f"正在校验本地模型: {local_candidate.name}", 0, total_bytes)
-        if _valid_file(local_candidate, selected.size, selected.sha256):
+        if _valid_file(local_candidate, selected.size, selected.sha256, cancel_event):
             model_ready = True
             verified_model = local_candidate.resolve()
-            info(f"[Hy-MT2 部署] 已接入校验通过的本地模型: {verified_model}")
+            info(f"[本地 GGUF] 已接入校验通过的本地模型: {verified_model}")
             _emit(progress_callback, "model_ready", f"本地模型校验通过，已接入: {selected.label}", 0, total_bytes)
         else:
-            info(f"[Hy-MT2 部署] 本地模型校验失败，改为下载: {local_candidate}")
+            info(f"[本地 GGUF] 本地模型校验失败，改为下载: {local_candidate}")
             total_bytes += selected.size
     if not model_ready:
-        info(f"[Hy-MT2 部署] 开始下载模型: {selected.source_url}")
+        info(f"[本地 GGUF] 开始下载模型: {selected.source_url}")
         _download(
             selected.source_url,
             model_download,
@@ -343,6 +469,7 @@ def install_component(
             f"下载 {selected.label}",
             completed_bytes,
             total_bytes,
+            cancel_event,
         )
         completed_bytes += selected.size
         downloaded_model = True
@@ -350,8 +477,9 @@ def install_component(
     runtime_archives: list[tuple[RuntimeAsset, Path]] = []
     if not runtime_ready:
         for asset in assets:
+            _raise_if_cancelled(cancel_event)
             archive = downloads / asset.filename
-            info(f"[Hy-MT2 部署] 下载运行器资源: {asset.filename}")
+            info(f"[本地 GGUF] 下载运行器资源: {asset.filename}")
             _download(
                 asset.url,
                 archive,
@@ -361,6 +489,7 @@ def install_component(
                 f"下载 {runner} 运行器",
                 completed_bytes,
                 total_bytes,
+                cancel_event,
             )
             completed_bytes += asset.size
             runtime_archives.append((asset, archive))
@@ -368,11 +497,12 @@ def install_component(
     staging = root / f"runtime.staging.{os.getpid()}"
     backup = root / "runtime.backup"
     try:
+        _raise_if_cancelled(cancel_event)
         if downloaded_model:
             managed_model.parent.mkdir(parents=True, exist_ok=True)
             model_download.replace(managed_model)
             verified_model = managed_model
-            info(f"[Hy-MT2 部署] 模型校验完成并已安装: {managed_model}")
+            info(f"[本地 GGUF] 模型校验完成并已安装: {managed_model}")
             _emit(
                 progress_callback,
                 "model_installed",
@@ -381,11 +511,11 @@ def install_component(
                 total_bytes,
             )
         if runtime_archives:
-            info(f"[Hy-MT2 部署] 正在解压并切换 {runner} 运行器")
+            info(f"[本地 GGUF] 正在解压并切换 {runner} 运行器")
             shutil.rmtree(staging, ignore_errors=True)
             staging.mkdir(parents=True, exist_ok=True)
             for _asset, archive in runtime_archives:
-                _safe_extract_zip(archive, staging)
+                _safe_extract_zip(archive, staging, cancel_event)
             if not (staging / "llama-server.exe").is_file():
                 raise RuntimeError("llama.cpp 运行包缺少 llama-server.exe")
             if runner == "vulkan" and not (staging / "ggml-vulkan.dll").is_file():
@@ -397,7 +527,7 @@ def install_component(
                 runtime_dir().replace(backup)
             staging.replace(runtime_dir())
             shutil.rmtree(backup, ignore_errors=True)
-            info(f"[Hy-MT2 部署] 运行器已就绪: {runtime_executable()}")
+            info(f"[本地 GGUF] 运行器已就绪: {runtime_executable()}")
             _emit(
                 progress_callback,
                 "runtime_ready",
@@ -411,36 +541,40 @@ def install_component(
             backup.replace(runtime_dir())
         raise
 
-    _download_license(selected.license_url, root / "licenses" / f"{selected.name}-LICENSE.txt")
-    _download_license(LLAMA_LICENSE_URL, root / "licenses" / "llama.cpp-LICENSE.txt")
+    _raise_if_cancelled(cancel_event)
+    _download_license(selected.license_url, root / "licenses" / f"{selected.name}-LICENSE.txt", cancel_event)
+    _download_license(LLAMA_LICENSE_URL, root / "licenses" / "llama.cpp-LICENSE.txt", cancel_event)
     manifest = _load_manifest()
     models = _manifest_models(manifest)
-    model_entry = {
-        "sha256": selected.sha256,
-        "size": selected.size,
-        "installed_at": int(time.time()),
-    }
-    if verified_model and verified_model.resolve() != managed_model.resolve():
-        model_entry["path"] = str(verified_model)
-    models[selected.name] = model_entry
+    if not custom_selected:
+        model_entry = {
+            "sha256": selected.sha256,
+            "size": selected.size,
+            "installed_at": int(time.time()),
+        }
+        if verified_model and verified_model.resolve() != managed_model.resolve():
+            model_entry["path"] = str(verified_model)
+        models[selected.name] = model_entry
     manifest.update({
         "models": models,
         "runner": runner,
         "runtime_version": LLAMA_RELEASE,
         "runtime_assets": [asset.filename for asset in assets],
         "hardware": hardware,
-        "source": "Tencent-Hunyuan/Hy-MT2 + ggml-org/llama.cpp",
+        "source": "EngAixt GGUF + ggml-org/llama.cpp",
     })
     # Preserve the legacy fields so versions before multi-model support can
     # still recognize an existing 1.8B installation after an app downgrade.
-    if selected.name == DEFAULT_MODEL_NAME:
+    if selected.name == DEFAULT_MODEL_NAME and not custom_selected:
         manifest.update({
             "model": selected.name,
             "model_sha256": selected.sha256,
             "model_size": selected.size,
         })
+    _raise_if_cancelled(cancel_event)
     manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    info("[Hy-MT2 部署] 已写入本地组件清单，准备自动启动验证")
+    invalidate_component_status_cache()
+    info("[本地 GGUF] 已写入本地组件清单，准备自动启动验证")
     _emit(
         progress_callback,
         "manifest_ready",
@@ -459,6 +593,7 @@ def install_component(
 
 
 def remove_component(model_name: str | None = None) -> dict:
+    invalidate_component_status_cache()
     selected = model_spec(selected_model_name() if model_name is None else model_name)
     try:
         from translators.hy_mt2_runtime import shutdown_runtime
@@ -480,6 +615,7 @@ def remove_component(model_name: str | None = None) -> dict:
         manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         shutil.rmtree(component_dir(), ignore_errors=True)
+    invalidate_component_status_cache()
     return component_status(selected.name)
 
 
@@ -508,9 +644,11 @@ def _download(
     label: str,
     completed_before: int,
     total_bytes: int,
+    cancel_event=None,
 ) -> None:
-    if _valid_file(destination, expected_size, expected_sha256):
-        info(f"[Hy-MT2 部署] 已复用校验通过的下载文件: {destination.name}")
+    _raise_if_cancelled(cancel_event)
+    if _valid_file(destination, expected_size, expected_sha256, cancel_event):
+        info(f"[本地 GGUF] 已复用校验通过的下载文件: {destination.name}")
         _emit(callback, "asset_ready", f"{label}：已存在", completed_before + expected_size, total_bytes)
         return
     part = destination.with_suffix(destination.suffix + ".part")
@@ -520,69 +658,108 @@ def _download(
         part.unlink()
         offset = 0
     if offset:
-        info(f"[Hy-MT2 部署] 续传 {label}: 已有 {offset / 1024 / 1024:.0f} MB")
+        info(f"[本地 GGUF] 续传 {label}: 已有 {offset / 1024 / 1024:.0f} MB")
     headers = {"User-Agent": "EngAixt-HyMT2/1.0"}
     if offset:
         headers["Range"] = f"bytes={offset}-"
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=120) as response:
-        if offset and not _response_resumed_from(response, offset):
-            # 服务器没有从请求的偏移量开始返回，已有分片不可信，必须重下
-            offset = 0
-            part.unlink(missing_ok=True)
-        mode = "ab" if offset else "wb"
-        downloaded = offset
-        last_emit = 0.0
-        with open(part, mode) as output:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                output.write(chunk)
-                downloaded += len(chunk)
-                now = time.monotonic()
-                if now - last_emit >= 0.4:
-                    _emit(callback, "download", label, completed_before + downloaded, total_bytes)
-                    last_emit = now
-    if not _valid_file(part, expected_size, expected_sha256):
-        raise RuntimeError(f"{label} 校验失败，请重试")
+    try:
+        # A short socket timeout makes a cancellation responsive even when the
+        # CDN has stopped sending bytes. The loop keeps waiting for ordinary
+        # transient read timeouts while the user has not cancelled.
+        with urllib.request.urlopen(request, timeout=8) as response:
+            if offset and not _response_resumed_from(response, offset):
+                # 服务器没有从请求的偏移量开始返回，已有分片不可信，必须重下
+                offset = 0
+                part.unlink(missing_ok=True)
+            mode = "ab" if offset else "wb"
+            downloaded = offset
+            last_emit = 0.0
+            with open(part, mode) as output:
+                while True:
+                    _raise_if_cancelled(cancel_event)
+                    try:
+                        chunk = response.read(1024 * 1024)
+                    except (TimeoutError, socket.timeout):
+                        _raise_if_cancelled(cancel_event)
+                        continue
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.monotonic()
+                    if now - last_emit >= 0.4:
+                        _emit(callback, "download", label, completed_before + downloaded, total_bytes)
+                        last_emit = now
+    except ComponentInstallCancelled:
+        # A cancelled install should not resume an abandoned multi-GB partial
+        # file on the next click, and must never publish it as an asset.
+        part.unlink(missing_ok=True)
+        raise
+    try:
+        _raise_if_cancelled(cancel_event)
+        if not _valid_file(part, expected_size, expected_sha256, cancel_event):
+            raise RuntimeError(f"{label} 校验失败，请重试")
+    except ComponentInstallCancelled:
+        part.unlink(missing_ok=True)
+        raise
     part.replace(destination)
-    info(f"[Hy-MT2 部署] 下载和 SHA-256 校验通过: {destination.name}")
+    info(f"[本地 GGUF] 下载和 SHA-256 校验通过: {destination.name}")
     _emit(callback, "download_done", f"{label}完成", completed_before + expected_size, total_bytes)
 
 
-def _valid_file(path: Path, expected_size: int, expected_sha256: str) -> bool:
+def _valid_file(path: Path, expected_size: int, expected_sha256: str, cancel_event=None) -> bool:
     if not path.is_file() or path.stat().st_size != expected_size:
         return False
-    return _sha256(path) == expected_sha256.lower()
+    return _sha256(path, cancel_event) == expected_sha256.lower()
 
 
-def _sha256(path: Path) -> str:
+def _sha256(path: Path, cancel_event=None) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as stream:
-        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+        while True:
+            _raise_if_cancelled(cancel_event)
+            chunk = stream.read(4 * 1024 * 1024)
+            if not chunk:
+                break
             digest.update(chunk)
     return digest.hexdigest().lower()
 
 
-def _safe_extract_zip(archive: Path, destination: Path) -> None:
+def _safe_extract_zip(archive: Path, destination: Path, cancel_event=None) -> None:
     root = destination.resolve()
     with zipfile.ZipFile(archive) as package:
         for member in package.infolist():
+            _raise_if_cancelled(cancel_event)
             target = (destination / member.filename).resolve()
             try:
                 target.relative_to(root)
             except ValueError as exc:
                 raise RuntimeError(f"运行包包含不安全路径: {member.filename}") from exc
-        package.extractall(destination)
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with package.open(member) as source, open(target, "wb") as output:
+                while True:
+                    _raise_if_cancelled(cancel_event)
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
 
 
-def _download_license(url: str, destination: Path) -> None:
+def _download_license(url: str, destination: Path, cancel_event=None) -> None:
     try:
+        _raise_if_cancelled(cancel_event)
         destination.parent.mkdir(parents=True, exist_ok=True)
         request = urllib.request.Request(url, headers={"User-Agent": "EngAixt-HyMT2/1.0"})
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=8) as response:
             destination.write_bytes(response.read())
+        _raise_if_cancelled(cancel_event)
+    except ComponentInstallCancelled:
+        destination.unlink(missing_ok=True)
+        raise
     except Exception:
         pass
 
@@ -639,14 +816,14 @@ def _registered_model_path(spec: HyMt2ModelSpec, manifest: dict) -> Path:
     return _managed_model_path(spec)
 
 
-def _model_status(spec: HyMt2ModelSpec, manifest: dict) -> dict:
+def _model_status(spec: HyMt2ModelSpec, manifest: dict, *, discover: bool = True) -> dict:
     entry = _manifest_models(manifest).get(spec.name, {})
     path = _registered_model_path(spec, manifest)
     ready = (
         _matches_model_size(path, spec)
         and str(entry.get("sha256") or "").lower() == spec.sha256
     )
-    candidate = None if ready else _discover_local_model(spec)
+    candidate = None if ready or not discover else _discover_local_model(spec)
     return {
         "name": spec.name,
         "label": spec.label,
@@ -705,14 +882,13 @@ def _local_model_search_roots() -> tuple[Path, ...]:
         home / "Documents" / "AI",
         home / "Desktop" / "models",
     ]
-    for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-        drive = Path(f"{drive_letter}:\\")
-        if not drive.exists():
-            continue
-        roots.extend(
-            drive / name
-            for name in ("models", "model", "AI", "ai", "LLM", "llm", "hymt2", "HyMT2", "Hy-MT2", "Hunyuan")
-        )
+    # Never walk every mounted drive from a settings refresh. Network drives
+    # and large game/data volumes can make that synchronous scan appear stuck
+    # forever. Users can select any GGUF directly; these roots are only a
+    # small compatibility fallback for older managed-model installs.
+    configured_root = os.environ.get("ENGAIXT_MODEL_SEARCH_ROOT", "").strip()
+    if configured_root:
+        roots.append(Path(configured_root).expanduser())
 
     unique: list[Path] = []
     seen: set[str] = set()
@@ -733,12 +909,17 @@ def _format_gib(size: int) -> str:
     return f"{int(size) / 1024 / 1024 / 1024:.1f} GB"
 
 
-def _directory_size(path: Path) -> int:
-    total = 0
-    try:
-        for child in path.rglob("*"):
-            if child.is_file():
-                total += child.stat().st_size
-    except OSError:
-        pass
-    return total
+def _runtime_declared_bytes(manifest: dict) -> int:
+    """Return the declared runtime download size without recursively walking it."""
+    names = {str(name) for name in (manifest.get("runtime_assets") or [])}
+    return sum(
+        asset.size
+        for assets in RUNTIME_ASSETS.values()
+        for asset in assets
+        if asset.filename in names
+    )
+
+
+def _installed_component_bytes(model_rows: list[dict], manifest: dict) -> int:
+    model_bytes = sum(int(row.get("size") or 0) for row in model_rows if row.get("ready"))
+    return model_bytes + _runtime_declared_bytes(manifest)

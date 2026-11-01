@@ -249,7 +249,7 @@ def test_active_translator_select_uses_user_facing_labels():
     assert '<option value="zhipu">智谱 GLM</option>' in html
     assert '<option value="moonshot">Kimi</option>' in html
     assert '<option value="doubao">豆包 / 火山方舟</option>' in html
-    assert '<option value="hy_mt2">腾讯 Hy-MT2（离线）</option>' in html
+    assert '<option value="hy_mt2">本地 GGUF 模型（离线）</option>' in html
     assert "<option>qwen</option>" not in html
     assert "<option>zhipu</option>" not in html
     assert "<option>moonshot</option>" not in html

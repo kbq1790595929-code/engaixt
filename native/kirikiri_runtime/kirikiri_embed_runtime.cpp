@@ -434,6 +434,33 @@ std::wstring ReattachWideSpaceBreaks(
     return out;
 }
 
+volatile LONG gLookupLogCount = 0;
+
+void LogLookupSample(
+    const wchar_t *kind,
+    const std::string &source,
+    const std::string &visible,
+    bool hit,
+    size_t keyLen) {
+    LONG sample = InterlockedIncrement(&gLookupLogCount);
+    if (sample > 80) return;
+    std::wstring srcWide;
+    std::wstring visWide;
+    if (!Utf8ToWide(source, &srcWide)) return;
+    Utf8ToWide(visible, &visWide);
+    auto preview = [](std::wstring value) {
+        if (value.size() > 60) value = value.substr(0, 60) + L"...";
+        return value;
+    };
+    Log(std::wstring(L"[kirikiri embed] lookup ") + kind +
+        (hit ? L" HIT" : L" MISS") +
+        L" src_len=" + std::to_wstring(source.size()) +
+        L" vis_len=" + std::to_wstring(visible.size()) +
+        L" key_len=" + std::to_wstring(keyLen) +
+        L" src=" + preview(srcWide) +
+        L" | vis=" + preview(visWide));
+}
+
 const char *ResolveUtf8(
     const char *original,
     const std::string &source,
@@ -453,6 +480,7 @@ const char *ResolveUtf8(
                 found = gTranslations.find(source);
             }
             if (found != gTranslations.end() && found->second && !found->second->empty()) {
+                LogLookupSample(L"utf8", source, visibleSource, true, found->first.size());
                 gWaitStarted.erase(source);
                 InterlockedIncrement(&gReplacementCount);
                 if (waited) InterlockedIncrement(&gWaitHitCount);
@@ -498,6 +526,7 @@ const char *ResolveUtf8(
                 return stable->c_str();
             }
             if (gWaitTimeoutMs == 0) {
+                LogLookupSample(L"utf8", source, visibleSource, false, 0);
                 InterlockedIncrement(&gMissCount);
                 return original;
             }
@@ -539,6 +568,7 @@ const wchar_t *ResolveWide(
                 found = gWideTranslations.find(sourceUtf8);
             }
             if (found != gWideTranslations.end() && found->second && !found->second->empty()) {
+                LogLookupSample(L"wide", sourceUtf8, visibleUtf8, true, found->first.size());
                 const std::wstring &replacement = *found->second;
                 if (replacement.find(L'[') != std::wstring::npos ||
                     replacement.find(L']') != std::wstring::npos) {
@@ -551,6 +581,7 @@ const wchar_t *ResolveWide(
                 return replacement.c_str();
             }
             if (gWaitTimeoutMs == 0) {
+                LogLookupSample(L"wide", sourceUtf8, visibleUtf8, false, 0);
                 InterlockedIncrement(&gWideMissCount);
                 return original;
             }

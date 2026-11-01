@@ -40,6 +40,7 @@ DIAGNOSTIC_SNAPSHOT_FIELDS = frozenset({
     "doubao_model",
     "anthropic_model",
     "hy_mt2_model",
+    "hy_mt2_custom_model_path",
     "hy_mt2_context_size",
     "hy_mt2_batch_size",
     "hy_mt2_parallel",
@@ -51,6 +52,7 @@ DIAGNOSTIC_SNAPSHOT_FIELDS = frozenset({
     "translation_cache_enabled",
     "translation_cache_auto_cleanup",
     "translation_cache_max_size_gb",
+    "custom_pricing",
     "selection_preflight_enabled",
     "keep_workspace",
     "workspace_dir",
@@ -98,7 +100,10 @@ class Config:
     doubao_model: str = "doubao-seed-2-1-turbo-260628"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
-    hy_mt2_model: str = "Hy-MT2-1.8B-Q4_K_M"
+    hy_mt2_model: str = "EngAixt-7B-Q4_K_M"
+    # Optional user-selected GGUF. When set, it takes precedence over the
+    # built-in Hy-MT2 model registry without copying or hashing the file.
+    hy_mt2_custom_model_path: str = ""
     hy_mt2_context_size: int = 4096
     hy_mt2_batch_size: int = 8
     hy_mt2_parallel: int = 3
@@ -114,6 +119,7 @@ class Config:
     translation_cache_enabled: bool = True  # 全局 API 译文缓存；关闭后不读取/写入跨任务缓存
     translation_cache_auto_cleanup: bool = True  # 缓存超过阈值后自动清理旧记录
     translation_cache_max_size_gb: float = 1.0  # 全局译文缓存上限，默认 1GB
+    custom_pricing: dict = field(default_factory=dict)  # 用户自定义模型价格：{provider: {model: {input_cny_per_m, output_cny_per_m}}}
     selection_preflight_enabled: bool = False  # 选中游戏后是否自动解包提取并估算费用
     keep_workspace: bool = False
     workspace_dir: str = ""  # 空则默认 Downloads/.game_translator/workspaces
@@ -248,6 +254,8 @@ def _coerce_config_value(value, default):
         if isinstance(value, list):
             return [str(item) for item in value]
         return _INVALID
+    if isinstance(default, dict):
+        return value if isinstance(value, dict) else _INVALID
     return value
 
 

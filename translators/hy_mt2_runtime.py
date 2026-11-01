@@ -17,6 +17,7 @@ from translators.hy_mt2_component import (
     component_status,
     model_path,
     runtime_executable,
+    selected_model_id,
     selected_model_name,
 )
 from utils.logger import info, warning
@@ -102,7 +103,7 @@ class HyMt2Runtime:
             if str(message.get("content") or "").strip()
         ]
         if not normalized:
-            raise ValueError("Hy-MT2 messages cannot be empty")
+            raise ValueError("本地 GGUF 模型消息不能为空")
         self._cancel_idle_timer()
         with self._lock:
             self._inflight += 1
@@ -120,10 +121,10 @@ class HyMt2Runtime:
                         other_requests_active = self._inflight > 1
                     if other_requests_active:
                         raise
-                    warning(f"Hy-MT2 {self.active_backend} 推理失败，回退 CPU: {exc}")
+                    warning(f"本地 GGUF {self.active_backend} 推理失败，回退 CPU: {exc}")
                     with self._start_lock:
                         self.stop()
-                        self._start_backend("cpu", selected_model_name())
+                        self._start_backend("cpu", selected_model_id())
                     return self._request(normalized, max_tokens, on_token=on_token)
         finally:
             with self._lock:
@@ -132,7 +133,7 @@ class HyMt2Runtime:
 
     def ensure_started(self) -> None:
         with self._lock:
-            selected_model = selected_model_name()
+            selected_model = selected_model_id()
             if (
                 self._process
                 and self._process.poll() is None
@@ -144,20 +145,20 @@ class HyMt2Runtime:
             status = component_status(selected_model)
             if not status.get("ready"):
                 raise HyMt2ComponentMissingError(
-                    "Hy-MT2 离线组件未就绪，请在设置中点击“下载/修复离线组件”"
+                    "本地 GGUF 模型或 llama.cpp 运行器未就绪，请在设置中选择模型并配置运行器"
                 )
             preferred = "cuda" if str(status.get("runner", "")).startswith("cuda") else "vulkan"
             try:
                 self._start_backend(preferred, selected_model)
             except Exception as exc:
-                warning(f"Hy-MT2 {preferred} 后端启动失败，回退 CPU: {exc}")
+                warning(f"本地 GGUF {preferred} 后端启动失败，回退 CPU: {exc}")
                 self.stop()
                 self._start_backend("cpu", selected_model)
 
     def verify_selected_model(self) -> dict[str, str | int | float]:
         """Boot the chosen backend and prove it can generate before install succeeds."""
-        selected_model = selected_model_name()
-        info(f"[Hy-MT2 部署] 自动启动后端验证: model={selected_model}")
+        selected_model = selected_model_id()
+        info(f"[本地 GGUF] 自动启动后端验证: model={selected_model}")
         self._cancel_idle_timer()
         with self._start_lock:
             self.ensure_started()
@@ -179,7 +180,7 @@ class HyMt2Runtime:
                     "elapsed_seconds": round(completion.elapsed_seconds, 3),
                 }
                 info(
-                    "[Hy-MT2 部署] 后端验证通过: "
+                    "[本地 GGUF] 后端验证通过: "
                     f"model={result['model']}, backend={result['backend']}, "
                     f"生成={result['completion_tokens']} tokens, "
                     f"耗时={result['elapsed_seconds']}s"
@@ -189,7 +190,7 @@ class HyMt2Runtime:
                 # Installation verifies the full path once, then releases memory.
                 # Translation later starts the chosen backend automatically.
                 self.stop()
-                info("[Hy-MT2 部署] 验证完成，已释放本地模型内存")
+                info("[本地 GGUF] 验证完成，已释放本地模型内存")
 
     def stop(self) -> None:
         with self._lock:
@@ -219,7 +220,7 @@ class HyMt2Runtime:
         executable = runtime_executable()
         selected_path = model_path(selected_model)
         if not executable.is_file() or not selected_path.is_file():
-            raise HyMt2ComponentMissingError("Hy-MT2 模型或运行器缺失")
+            raise HyMt2ComponentMissingError("本地 GGUF 模型或 llama.cpp 运行器缺失")
         slot_context_size, total_context_size = self._configured_context_sizes()
         parallelism = self._configured_parallelism()
         port = _free_port()
@@ -230,7 +231,7 @@ class HyMt2Runtime:
             "--host", "127.0.0.1",
             "--port", str(port),
             "--parallel", str(parallelism),
-            "--alias", selected_model.lower(),
+            "--alias", selected_path.stem.lower(),
             "--no-webui",
             "--jinja",
         ]
@@ -263,13 +264,13 @@ class HyMt2Runtime:
                 raise RuntimeError(f"llama-server 提前退出: {tail}")
             if self._health_ready():
                 info(
-                    f"Hy-MT2 本地运行时已启动: model={selected_model}, "
+                    f"本地 GGUF 运行时已启动: model={selected_model}, "
                     f"backend={backend}, parallel={parallelism}, "
                     f"slot_context={slot_context_size}, total_context={total_context_size}"
                 )
                 return
             time.sleep(0.25)
-        raise TimeoutError(f"Hy-MT2 {backend} 后端启动超时")
+        raise TimeoutError(f"本地 GGUF {backend} 后端启动超时")
 
     @staticmethod
     def _configured_parallelism() -> int:
@@ -319,7 +320,7 @@ class HyMt2Runtime:
         on_token: Callable[[int], None] | None = None,
     ) -> LocalCompletion:
         payload_data = {
-            "model": self.active_model or selected_model_name(),
+            "model": self.active_model or selected_model_id(),
             "messages": messages,
             "temperature": 0.2,
             "top_p": 0.6,
@@ -348,7 +349,7 @@ class HyMt2Runtime:
             raise RuntimeError(f"本地推理 HTTP {exc.code}: {body}") from exc
         choices = data.get("choices") or []
         if not choices:
-            raise RuntimeError("Hy-MT2 没有返回译文")
+            raise RuntimeError("本地 GGUF 模型没有返回译文")
         content = str((choices[0].get("message") or {}).get("content") or "").strip()
         usage = data.get("usage") or {}
         return LocalCompletion(
@@ -403,7 +404,7 @@ class HyMt2Runtime:
                 finish_reason = str(choice.get("finish_reason") or finish_reason)
         content = "".join(parts).strip()
         if not content:
-            raise RuntimeError("Hy-MT2 流式响应没有返回译文")
+            raise RuntimeError("本地 GGUF 流式响应没有返回译文")
         return LocalCompletion(
             content=content,
             prompt_tokens=prompt_tokens,
@@ -419,7 +420,7 @@ class HyMt2Runtime:
         def stop_if_idle():
             with self._lock:
                 if self._inflight == 0:
-                    info("Hy-MT2 空闲超时，释放本地模型内存")
+                    info("本地 GGUF 空闲超时，释放本地模型内存")
                     self.stop()
 
         with self._lock:

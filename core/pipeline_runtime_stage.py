@@ -16,6 +16,7 @@ from config import get_config
 from core.engine_capabilities import can_repack
 from core.kirikiri_launcher_policy import (
     KIRIKIRI_REALTIME_LAUNCHER_NAME,
+    KIRIKIRI_STANDALONE_LAUNCHER_NAME,
     find_kirikiri_static_launcher,
 )
 from core.launcher import (
@@ -642,6 +643,12 @@ def create_runtime_launchers(pipeline, game_path: Path, engine, checkpoint: Path
             realtime = launcher.parent / KIRIKIRI_REALTIME_LAUNCHER_NAME
             if realtime.is_file():
                 pipeline.manifest.record_created(realtime, kind="realtime_launcher", runtime_required=True)
+            standalone = launcher.parent / KIRIKIRI_STANDALONE_LAUNCHER_NAME
+            if standalone.is_file():
+                pipeline.manifest.record_created(standalone, kind="runtime", runtime_required=True)
+                target_file = launcher.parent / "_translation_meta" / "kirikiri_launcher_target.txt"
+                if target_file.is_file():
+                    pipeline.manifest.record_created(target_file, kind="runtime", runtime_required=True)
 
 def prepare_runtime_dependencies(pipeline, game_path: Path, engine) -> None:
     if getattr(engine, "name", "") in {"godot", "godot_frida"}:

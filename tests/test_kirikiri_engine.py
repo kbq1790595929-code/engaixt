@@ -2256,3 +2256,13 @@ def test_kirikiri_capture_hook_env_keeps_the_legacy_name_alias():
     assert 'L"KIRIKIRI_LUNA_CAPTURE_HOOKS"' in native
     # the new name must be consulted before the legacy one
     assert native.index('L"KIRIKIRI_CAPTURE_HOOKS"') < native.index('L"KIRIKIRI_LUNA_CAPTURE_HOOKS"')
+
+
+def test_kirikiri_native_hook_ignores_literal_newline_escapes_for_paths():
+    """PSB 台词用字面 ``\\n``（反斜杠 + n）表示换行，不能当成文件路径拒掉。"""
+    native = (Path(__file__).parent.parent / "native" / "kirikiri_runtime" / "kirikiri_native_hook.cpp").read_text(encoding="utf-8")
+    body = native.split("bool IsPathLikeText", 1)[1].split("std::wstring TrimWide", 1)[0]
+
+    assert "s[i + 1] == L'n'" in body
+    assert "s[i + 1] == L'r'" in body
+    assert "s[i + 1] == L't'" in body

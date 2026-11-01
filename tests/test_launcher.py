@@ -655,7 +655,7 @@ def test_kirikiri_native_map_is_base64_tsv():
 
         count = _write_kirikiri_native_map(checkpoint, out)
 
-        assert count == 6
+        assert count == 8
         lines = out.read_text(encoding="ascii").splitlines()
         assert lines[0].startswith("#")
         pairs = {
@@ -666,9 +666,47 @@ def test_kirikiri_native_map_is_base64_tsv():
         assert ("朝[r]昼", "早上[r]中午") in pairs
         assert ("朝\n昼", "早上\n中午") in pairs
         assert ("朝昼", "早上中午") in pairs
+        # 运行时按行渲染：整段 key 之外还必须有逐行 key，否则多行对话不翻译。
+        assert ("朝", "早上") in pairs
+        assert ("昼", "中午") in pairs
         assert ("今日はいい天気だ", "今天天气真好") in pairs
         assert ("翼「今日はいい天気だ」", "翼「今天天气真好」") in pairs
         assert ("@jump storage=\"next.ks\"", "跳转到 next.ks") not in pairs
+
+
+def test_kirikiri_native_map_maps_multiline_and_u3000_breaks():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        checkpoint = root / "translation_checkpoint.json"
+        out = root / "kirikiri_native_map.tsv"
+        checkpoint.write_text(json.dumps({
+            "items": [
+                {"original": "おはよう\u3000いい天気だね", "translated": "早上好\u3000天气不错呢"},
+                {"original": "上の行\r\n下の行", "translated": "上行\r\n下行"},
+                {"original": "あ\\n\u3000い", "translated": "甲\\n　乙"},
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+
+        assert _write_kirikiri_native_map(checkpoint, out) >= 6
+        lines = out.read_text(encoding="ascii").splitlines()
+        pairs = {
+            tuple(base64.b64decode(part).decode("utf-8") for part in line.split("\t"))
+            for line in lines[1:]
+        }
+        # 运行时 CollapseWideSpaces 会把 U+3000 折叠成半角空格。
+        assert ("おはよう いい天気だね", "早上好 天气不错呢") in pairs
+        # 逐行 key：渲染器一行一行画。
+        assert ("おはよう", "早上好") in pairs
+        assert ("いい天気だね", "天气不错呢") in pairs
+        # PSB 把换行存成字面 ``\n``（反斜杠 + n），运行时原样传入。
+        assert ("上の行\\n下の行", "上行\\n下行") in pairs
+        assert ("上の行", "上行") in pairs
+        assert ("下の行", "下行") in pairs
+        # 字面 \n 会被运行时解释成真换行；其后 U+3000 可能折叠成半角空格。
+        # 三种形态都要有，否则长台词在绘制路径 miss、只在测量路径命中。
+        assert ("あ\\n い", "甲\n　乙") in pairs
+        assert ("あ\\n\u3000い", "甲\n　乙") in pairs
+        assert ("あ\n い", "甲\n　乙") in pairs
 
 
 def test_bgi_launcher_prefers_native_runtime_when_built(tmp_path, monkeypatch):

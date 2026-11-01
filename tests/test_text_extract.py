@@ -273,6 +273,18 @@ def test_true_positives():
     assert not failures, f"true positives should remain translatable: {failures!r}"
 
 
+def test_multiline_dialogue_is_translatable():
+    """KiriKiri PSB 多行消息用 \\r\\n 连接，不能按二进制控制字符拒掉。"""
+    assert is_translatable("「俺は朝倉純一。見ての通り、\r\n　ょっとした魔法が使える……ただの男さ」") is True
+    assert is_translatable("上の行\n下の行") is True
+    assert is_translatable("first line\r\nsecond line") is True
+
+
+def test_binary_control_characters_are_still_rejected():
+    assert is_translatable("hello\x01world") is False
+    assert is_translatable("こんにちは\x07") is False
+
+
 def test_bracketed_dialogue_is_not_protected_as_placeholder():
     original = "@proto1 [よし、みんな揃ったね。]"
     translated = "@proto1 [好，大家都到齐了。]"

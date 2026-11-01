@@ -21,6 +21,61 @@ def game_id_for(game_dir: Path) -> str:
     return hashlib.sha256(str(game_dir.resolve()).encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
+_TRANSLATION_ARTIFACTS = {"patch.xp3", "patch2.xp3", "patch3.xp3", "patch4.xp3"}
+
+
+def _game_resource_files(game_dir: Path) -> list[Path]:
+    """Return the original game payload files used as the content fingerprint.
+
+    Translation outputs (``patch*.xp3`` and launcher batches) are excluded so
+    that applying a patch does not invalidate the checkpoint of the same game.
+    """
+    root = Path(game_dir)
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return []
+    files: list[Path] = []
+    for path in entries:
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        name = path.name.lower()
+        if name in _TRANSLATION_ARTIFACTS or name.startswith("启动"):
+            continue
+        if name.endswith((".xp3", ".exe", ".sig")):
+            files.append(path)
+    return files
+
+
+def game_content_fingerprint(game_dir: Path) -> str:
+    """Stable fingerprint of the game payload (size + mtime).
+
+    Re-extracting or replacing ``data.xp3`` changes the fingerprint so a stale
+    checkpoint from a previous install is not silently reused.
+    """
+    parts: list[str] = []
+    for path in _game_resource_files(game_dir):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        parts.append(f"{path.name}:{stat.st_size}:{int(stat.st_mtime)}")
+    return hashlib.sha256("|".join(parts).encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def newest_game_resource_mtime(game_dir: Path) -> float:
+    newest = 0.0
+    for path in _game_resource_files(game_dir):
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
