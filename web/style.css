@@ -2177,3 +2177,6 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .custom-pricing-table select:focus { border-color: var(--border-hi); }
 .custom-pricing-table td:last-child { width: 40px; }
 .custom-pricing-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+/* 空的状态提示直接隐藏，避免出现无内容的空框 */
+.settings-note:empty { display: none; }

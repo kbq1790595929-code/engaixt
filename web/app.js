@@ -648,6 +648,10 @@ function openSettings() {
     document.getElementById("settings-overlay").classList.add("open");
     loadSettings();
     refreshAppUpdateInfo();
+    // 打开设置时自动刷新当前服务商的模型列表与价格，避免一直停留在默认提示。
+    if (typeof refreshCloudModelState === "function") {
+        refreshCloudModelState();
+    }
 }
 function closeSettings() {
     document.getElementById("settings-overlay").classList.remove("open");
@@ -2106,6 +2110,8 @@ window.addEventListener("pywebviewready", function () {
         if (c && c.bg_image) { _bgImagePath = c.bg_image; applyBgImage(c.bg_image); }
     });
     if (_isStatisticsPageActive()) loadUsageStatistics(true);
+    // 启动后即刷新模型列表与价格，覆盖自动打开设置页的场景。
+    if (typeof refreshCloudModelState === "function") refreshCloudModelState();
 });
 
 // 首屏先把主题选中态摆正，不必等 pywebview 就绪
