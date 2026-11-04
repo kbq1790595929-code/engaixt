@@ -330,6 +330,7 @@ async def run_checkpoint_resume_fast_path(
     items = pipeline._validate_all(items)
     pipeline._sync_checkpoint_json(checkpoint, items)
     items = await pipeline._retry_invalid_translations(items, checkpoint, source_lang, target_lang, path)
+    items = await pipeline._refill_empty_translations(items, checkpoint, source_lang, target_lang, path)
     pipeline._record_api_cache_stats(path, len(items))
 
     translated_count = sum(1 for i in items if _pipeline_mod._has_effective_translation(i))

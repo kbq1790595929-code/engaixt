@@ -317,3 +317,100 @@ async def retry_invalid_translations(pipeline, items: list, checkpoint: Path,
             ],
         })
     return items
+
+
+async def refill_empty_translations(
+    pipeline,
+    items: list,
+    checkpoint: Path,
+    source_lang: str,
+    target_lang: str,
+    game_path: Path | None = None,
+    *,
+    max_rounds: int = 3,
+) -> list:
+    """补翻空译：翻译/校验结束后，循环重翻仍为空的台词条目。
+
+    JSON 解析失败、校验失败、部分批次恢复失败都会留下空译文；这些条目
+    以前不会进入第二轮，游戏里表现为整段还是日文。这里只针对
+    ``context=message/choice`` 的空译，用更小的批次重翻，直到收敛。
+    """
+    from core import pipeline as _pipeline_mod
+    from core.translator_callbacks import translate_batch_with_callbacks
+
+    def pending_items() -> list:
+        return [
+            it for it in items
+            if not _pipeline_mod._has_effective_translation(it)
+            and str(getattr(it, "context", "") or "") in {"message", "choice"}
+            and str(getattr(it, "original", "") or "").strip()
+        ]
+
+    initial = pending_items()
+    if not initial:
+        return items
+    translator = _pipeline_mod._get_translator(get_config().active_translator)
+    if not translator:
+        return items
+
+    info(f"空译补翻：发现 {len(initial)} 条空译台词，开始重翻")
+    filled_total = 0
+    per_round: list[dict] = []
+    for round_no in range(1, max_rounds + 1):
+        pending = pending_items()
+        if not pending:
+            break
+        # 整轮一次性交给 translator：它内部按 token 预算切批并并发请求，
+        # 外层再串行切小批会让补翻比全量翻译还慢。
+        try:
+            retried = await translate_batch_with_callbacks(
+                translator,
+                pending,
+                source_lang,
+                target_lang,
+                on_progress=getattr(pipeline, "_update_item_progress", None),
+            )
+        except Exception as exc:
+            warning(f"空译补翻第 {round_no} 轮失败: {exc}")
+            break
+        trans_map = {
+            (it.file, it.key, it.original): it.translated
+            for it in retried
+            if _pipeline_mod._has_effective_translation(it)
+        }
+        round_filled = 0
+        for item in pending:
+            value = trans_map.get((item.file, item.key, item.original))
+            if not value:
+                # 模型对拟声词/短感叹常原样返回；不让"译文=原文"污染条目，
+                # 否则写回检查点后会变成非空的无效译文。
+                item.translated = ""
+                continue
+            item.translated = value
+            if hasattr(item, "meta") and isinstance(item.meta, dict):
+                item.meta.pop("validation_failed_translation", None)
+            round_filled += 1
+        if game_path:
+            _pipeline_mod.save_translations_to_cache(game_path, retried)
+        filled_total += round_filled
+        per_round.append({"round": round_no, "pending": len(pending), "filled": round_filled})
+        info(f"空译补翻第 {round_no} 轮：补上 {round_filled} 条，剩余 {len(pending_items())} 条")
+        if round_filled <= 0:
+            break
+
+    remaining = pending_items()
+    if getattr(pipeline, "diagnostics", None):
+        pipeline.diagnostics.set("empty_refill", {
+            "initial": len(initial),
+            "filled": filled_total,
+            "remaining": len(remaining),
+            "rounds": per_round,
+            "remaining_samples": [
+                {
+                    "source": str(it.original)[:200],
+                    "context": str(getattr(it, "context", "") or "")[:40],
+                }
+                for it in remaining[:10]
+            ],
+        })
+    return items
