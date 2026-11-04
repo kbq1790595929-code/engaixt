@@ -962,6 +962,9 @@ class Pipeline:
             items = await self._retry_invalid_translations(
                 items, checkpoint, source_lang, target_lang, path
             )
+            items = await self._refill_empty_translations(
+                items, checkpoint, source_lang, target_lang, path
+            )
             self._record_api_cache_stats(path, len(items))
             translated_count = sum(1 for i in items if _has_effective_translation(i))
             if self._blocked_count > 0:
@@ -1293,6 +1296,9 @@ class Pipeline:
                 items = await self._retry_invalid_translations(
                     items, self._checkpoint_path, source_lang, target_lang, path
                 )
+                items = await self._refill_empty_translations(
+                    items, self._checkpoint_path, source_lang, target_lang, path
+                )
                 self._record_api_cache_stats(path, len(items))
             translated_count = sum(1 for i in items if _has_effective_translation(i))
             if self._blocked_count > 0:
@@ -1564,6 +1570,12 @@ class Pipeline:
                                           source_lang: str, target_lang: str,
                                           game_path: Path | None = None) -> list:
         return await pipeline_translate_stage.retry_invalid_translations(
+            self, items, checkpoint, source_lang, target_lang, game_path)
+
+    async def _refill_empty_translations(self, items: list, checkpoint: Path,
+                                         source_lang: str, target_lang: str,
+                                         game_path: Path | None = None) -> list:
+        return await pipeline_translate_stage.refill_empty_translations(
             self, items, checkpoint, source_lang, target_lang, game_path)
 
     async def _do_patch_only(self, game_path: Path, json_path: Path,
