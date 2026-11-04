@@ -4,11 +4,11 @@ EngAixt 是面向 Windows 本地离线单机游戏的 AI 翻译工具：识别�
 提取文本，交给在线或本地模型翻译，再通过静态补丁、运行时 Hook 或显示层
 把译文送回游戏。
 
-这不是屏幕 OCR。译文会进入游戏自己的对话框、菜单和说明文字，并尽量保留
+译文会进入游戏自己的对话框、菜单和说明文字，并尽量保留
 控制符、占位符、换行和原有格式。
 
-**第一次用？** 看 [KiriKiri 游戏图文教程](docs/tutorial-krkr.md)：从导入游戏到游戏内中文，
-6 步带截图。
+**第一次用？** 看 [KiriKiri 游戏图文教程](docs/tutorial-krkr.md)
+其他引擎游戏也是基本同样的流程，本教程作为参考
 
 ## 支持的引擎
 
@@ -43,7 +43,7 @@ python app.py
 
 ## 图文教程
 
-- [用 EngAixt 汉化 KiriKiri 游戏](docs/tutorial-krkr.md)：导入游戏 → 识别引擎 → 提取 → 翻译 → 游戏内验证，6 步带截图
+- [用 EngAixt 汉化 KiriKiri 游戏](docs/tutorial-krkr.md)
 - 遇到问题先看 [常见问题](docs/tutorial-krkr.md#常见问题)，或在仓库提 Issue
 
 ## 项目范围
