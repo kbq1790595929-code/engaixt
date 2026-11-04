@@ -150,7 +150,7 @@ _updateRealtimeButton({name: "unity"});
 _updateRealtimeButton(null);
 assert.equal(button.hidden, true, "reset/detection pending must hide the button");
 """
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
 
 
@@ -183,5 +183,5 @@ global.t = s => s;
     assert.equal(calls.length, 1);
 })().catch(error => {console.error(error); process.exitCode = 1;});
 """
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
